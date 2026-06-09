@@ -1,35 +1,53 @@
 import 'package:flutter/material.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'dart:math' as math;
 import '../theme/app_theme.dart';
+import '../models/app_models.dart';
 import '../widgets/shared_widgets.dart';
+import '../services/narrator_service.dart';
+import '../services/secure_storage_service.dart';
 
-enum VoiceStyle { natural, poetic, scientific }
-
-enum PlaybackSpeed { slow, normal, fast }
-
+/// FEATURE: Narrator screen
+/// WHAT IT DOES:
+///   1. Calls NarratorService.generateNarration()
+///      → builds Gemini prompt from region + era + IPCC stats
+///      → calls Gemini API with user's key from SecureStorage
+///      → returns 3-paragraph narration text
+///   2. Calls NarratorService.synthesizeVoice()
+///      → sends text to Google TTS
+///      → returns MP3 bytes
+///   3. Plays MP3 via audioplayers package
+///      → waveform animation syncs to playback
+///   4. User can change voice style (Natural/Poetic/Scientific)
+///      → each style changes the Gemini prompt instruction
 class NarratorScreen extends StatefulWidget {
   const NarratorScreen({super.key});
-
   @override
   State<NarratorScreen> createState() => _NarratorScreenState();
 }
 
 class _NarratorScreenState extends State<NarratorScreen>
     with TickerProviderStateMixin {
-  VoiceStyle _voiceStyle = VoiceStyle.natural;
-  PlaybackSpeed _speed = PlaybackSpeed.normal;
-  bool _isPlaying = false;
-  double _progress = 0.48; // 0.0 – 1.0
-  int _currentChapter = 1;
 
+  // ── State ─────────────────────────────────────────────────────────────────
+  ClimateRegion _region    = kDefaultRegions.first; // Arctic
+  ClimateEra    _era       = ClimateEra.present2026;
+  VoiceStyle    _style     = VoiceStyle.natural;
+  bool          _isPlaying = false;
+  bool          _isLoading = false;
+  String?       _narrationText;
+  String?       _errorMsg;
+  double        _progress  = 0.0;
+  Duration      _total     = Duration.zero;
+  Duration      _position  = Duration.zero;
+  bool          _hasApiKey = false;
+
+  // ── Audio player ──────────────────────────────────────────────────────────
+  // WHY audioplayers: works on both Android AND Chrome web
+  final AudioPlayer _player = AudioPlayer();
+
+  // ── Waveform animation ────────────────────────────────────────────────────
   late final AnimationController _waveCtrl;
-
-  static const _chapters = [
-    _Chapter(index: 0, title: 'The World Before', era: '1900', done: true),
-    _Chapter(index: 1, title: 'The Great Melt', era: '1900–2026', done: false),
-    _Chapter(
-        index: 2, title: 'A World Without Ice', era: '2100', done: false),
-  ];
 
   @override
   void initState() {
@@ -37,13 +55,155 @@ class _NarratorScreenState extends State<NarratorScreen>
     _waveCtrl = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
-    )..repeat();
+    );
+    _checkApiKey();
+    _setupAudioListeners();
+  }
+
+  Future<void> _checkApiKey() async {
+    final has = await SecureStorageService.instance.hasGeminiKey();
+    if (mounted) setState(() => _hasApiKey = has);
+  }
+
+  void _setupAudioListeners() {
+    // Update progress bar as audio plays
+    _player.onPositionChanged.listen((pos) {
+      if (mounted) setState(() {
+        _position = pos;
+        _progress = _total.inMilliseconds > 0
+            ? pos.inMilliseconds / _total.inMilliseconds
+            : 0;
+      });
+    });
+
+    _player.onDurationChanged.listen((dur) {
+      if (mounted) setState(() => _total = dur);
+    });
+
+    // When audio finishes
+    _player.onPlayerComplete.listen((_) {
+      if (mounted) {
+        setState(() { _isPlaying = false; _progress = 0; });
+        _waveCtrl.stop();
+        _waveCtrl.reset();
+      }
+    });
   }
 
   @override
   void dispose() {
     _waveCtrl.dispose();
+    _player.dispose();
     super.dispose();
+  }
+
+  // ── Generate narration via Gemini API ─────────────────────────────────────
+  // WHAT HAPPENS:
+  //   NarratorService builds a prompt:
+  //   "You are a climate narrator. Region: Arctic. Year: 2026.
+  //    Ice has shrunk from 12.5M km² to 7M km². Temp anomaly: +1.3°C.
+  //    Write 3 paragraphs in a natural voice…"
+  //   → Gemini returns text
+  //   → Google TTS converts to MP3
+  //   → audioplayers plays it
+  Future<void> _generateAndPlay() async {
+    if (!_hasApiKey) {
+      _showNoKeyDialog();
+      return;
+    }
+
+    setState(() {
+      _isLoading    = true;
+      _errorMsg     = null;
+      _narrationText = null;
+    });
+
+    try {
+      // Step 1: Generate narration text via Gemini
+      final result = await NarratorService.instance.generateNarration(
+        region: _region,
+        era:    _era,
+        style:  _style,
+      );
+
+      if (result.hasError) {
+        setState(() { _errorMsg = result.errorMessage; _isLoading = false; });
+        return;
+      }
+
+      setState(() => _narrationText = result.text);
+
+      // Step 2: Convert text to MP3 via Google TTS
+      final mp3Bytes = await NarratorService.instance
+          .synthesizeVoice(result.text!);
+
+      if (mp3Bytes == null || mp3Bytes.isEmpty) {
+        setState(() {
+          _errorMsg = 'TTS failed — text generated but audio unavailable';
+          _isLoading = false;
+        });
+        return;
+      }
+
+      // Step 3: Play the MP3
+      await _player.play(BytesSource(mp3Bytes));
+      _waveCtrl.repeat();
+      setState(() { _isPlaying = true; _isLoading = false; });
+
+    } catch (e) {
+      setState(() {
+        _errorMsg = 'Error: $e';
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _togglePlayPause() async {
+    if (_isLoading) return;
+
+    if (_narrationText == null) {
+      // No narration yet — generate first
+      await _generateAndPlay();
+      return;
+    }
+
+    if (_isPlaying) {
+      await _player.pause();
+      _waveCtrl.stop();
+      setState(() => _isPlaying = false);
+    } else {
+      await _player.resume();
+      _waveCtrl.repeat();
+      setState(() => _isPlaying = true);
+    }
+  }
+
+  void _showNoKeyDialog() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppColors.bg2,
+        title: const Text('Gemini API Key Required',
+            style: TextStyle(color: AppColors.textPrimary)),
+        content: const Text(
+          'Add your free Gemini key in Settings → API Setup.\n\n'
+          'Get a free key at aistudio.google.com',
+          style: TextStyle(color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK', style: TextStyle(color: AppColors.primary)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDuration(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
   }
 
   @override
@@ -52,45 +212,300 @@ class _NarratorScreenState extends State<NarratorScreen>
       backgroundColor: AppColors.bg0,
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
+          padding: const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: 20),
+              const SizedBox(height: 4),
+
+              // ── Header ──────────────────────────────────────────────────
               Text('AI Narrator', style: AppTypography.heading1),
-              Text('Gemini · Google TTS', style: AppTypography.bodySmall),
-              const SizedBox(height: 24),
+              Text('Gemini · Google TTS',
+                  style: AppTypography.bodySmall),
+              const SizedBox(height: 20),
 
-              // ── Playback card ───────────────────────
-              _PlaybackCard(
-                chapter: _chapters[_currentChapter],
-                isPlaying: _isPlaying,
-                progress: _progress,
-                waveCtrl: _waveCtrl,
-                onPlayPause: () => setState(() => _isPlaying = !_isPlaying),
-                onPrev: _currentChapter > 0
-                    ? () => setState(() => _currentChapter--)
-                    : null,
-                onNext: _currentChapter < _chapters.length - 1
-                    ? () => setState(() => _currentChapter++)
-                    : null,
-                onSeek: (v) => setState(() => _progress = v),
+              // ── No API key warning ───────────────────────────────────────
+              if (!_hasApiKey)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppColors.warning.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                        color: AppColors.warning.withOpacity(0.4)),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.warning_amber_rounded,
+                        color: AppColors.warning, size: 20),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'No Gemini key set. Go to Settings → API Setup.',
+                        style: TextStyle(
+                            fontSize: 13, color: AppColors.warning),
+                      ),
+                    ),
+                  ]),
+                ),
+
+              // ── Playback card ────────────────────────────────────────────
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: AppColors.bg2,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFF1E2235)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Now playing badge
+                    if (_isPlaying || _narrationText != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Container(width: 6, height: 6,
+                              decoration: const BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: AppColors.primary)),
+                          const SizedBox(width: 6),
+                          Text(_isPlaying ? 'NOW PLAYING' : 'READY',
+                              style: AppTypography.caption.copyWith(
+                                  color: AppColors.primary,
+                                  letterSpacing: 1.2)),
+                        ]),
+                      ),
+                    const SizedBox(height: 12),
+
+                    Text(
+                      '${_region.name} · ${_era.label}',
+                      style: AppTypography.heading3,
+                    ),
+                    Text(
+                      _styleLabel(_style),
+                      style: AppTypography.bodySmall,
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Waveform
+                    AnimatedBuilder(
+                      animation: _waveCtrl,
+                      builder: (_, __) => SizedBox(
+                        height: 48,
+                        child: CustomPaint(
+                          size: const Size(double.infinity, 48),
+                          painter: _WavePainter(
+                            progress: _waveCtrl.value,
+                            isPlaying: _isPlaying,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Progress bar
+                    SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        thumbShape: const RoundSliderThumbShape(
+                            enabledThumbRadius: 6),
+                        overlayShape: const RoundSliderOverlayShape(
+                            overlayRadius: 14),
+                      ),
+                      child: Slider(
+                        value: _progress.clamp(0.0, 1.0),
+                        onChanged: (v) async {
+                          final pos = Duration(
+                            milliseconds:
+                                (v * _total.inMilliseconds).round(),
+                          );
+                          await _player.seek(pos);
+                        },
+                      ),
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(_formatDuration(_position),
+                            style: AppTypography.caption),
+                        Text(_formatDuration(_total),
+                            style: AppTypography.caption),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Play / Pause button
+                    Center(
+                      child: GestureDetector(
+                        onTap: _togglePlayPause,
+                        child: Container(
+                          width: 64, height: 64,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _isLoading
+                                ? AppColors.bg3 : AppColors.primary,
+                            boxShadow: _isLoading ? null : [
+                              BoxShadow(
+                                color: AppColors.primary.withOpacity(0.4),
+                                blurRadius: 20,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: _isLoading
+                              ? const Padding(
+                                  padding: EdgeInsets.all(18),
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2.5,
+                                      color: AppColors.primary))
+                              : Icon(
+                                  _isPlaying
+                                      ? Icons.pause_rounded
+                                      : Icons.play_arrow_rounded,
+                                  size: 32,
+                                  color: AppColors.bg0,
+                                ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
+              const SizedBox(height: 16),
+
+              // ── Error message ────────────────────────────────────────────
+              if (_errorMsg != null)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.critical.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                        color: AppColors.critical.withOpacity(0.3)),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.error_outline,
+                        color: AppColors.critical, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(_errorMsg!,
+                        style: const TextStyle(
+                            fontSize: 12, color: AppColors.critical))),
+                  ]),
+                ),
+
+              // ── Generated text preview ───────────────────────────────────
+              if (_narrationText != null) ...[
+                const SizedBox(height: 16),
+                const SectionHeader(title: 'Generated Narration'),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppColors.bg2,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFF1E2235)),
+                  ),
+                  child: Text(
+                    _narrationText!,
+                    style: AppTypography.bodySmall.copyWith(
+                      height: 1.7,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 24),
 
-              // ── Voice style ────────────────────────
+              // ── Region selector ──────────────────────────────────────────
+              const SectionHeader(title: 'Region'),
+              SizedBox(
+                height: 40,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: kDefaultRegions.map((r) {
+                    final active = r.id == _region.id;
+                    return GestureDetector(
+                      onTap: () => setState(() {
+                        _region = r;
+                        _narrationText = null;
+                        _errorMsg = null;
+                      }),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        margin: const EdgeInsets.only(right: 8),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: active
+                              ? AppColors.primary.withOpacity(0.15)
+                              : AppColors.bg3,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: active
+                                ? AppColors.primary
+                                : const Color(0xFF252840),
+                          ),
+                        ),
+                        child: Text(r.name.split(' ').first,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: active
+                                ? FontWeight.w700 : FontWeight.w400,
+                            color: active
+                                ? AppColors.primary
+                                : AppColors.textSecondary,
+                          )),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // ── Era selector ─────────────────────────────────────────────
+              const SectionHeader(title: 'Era'),
+              Row(
+                children: ClimateEra.values.map((e) => Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                        right: e != ClimateEra.values.last ? 8 : 0),
+                    child: EraChip(
+                      era: e,
+                      isSelected: e == _era,
+                      onTap: () => setState(() {
+                        _era = e;
+                        _narrationText = null;
+                        _errorMsg = null;
+                      }),
+                    ),
+                  ),
+                )).toList(),
+              ),
+              const SizedBox(height: 20),
+
+              // ── Voice style selector ─────────────────────────────────────
+              // WHY: Each style changes the Gemini prompt instruction.
+              // Natural → conversational, Poetic → lyrical, Scientific → data-heavy
               const SectionHeader(title: 'Voice Style'),
               Row(
                 children: VoiceStyle.values.map((s) {
-                  final active = s == _voiceStyle;
+                  final active = s == _style;
                   return Expanded(
                     child: Padding(
                       padding: EdgeInsets.only(
                           right: s != VoiceStyle.values.last ? 8 : 0),
                       child: GestureDetector(
-                        onTap: () => setState(() => _voiceStyle = s),
+                        onTap: () => setState(() {
+                          _style = s;
+                          _narrationText = null;
+                          _errorMsg = null;
+                        }),
                         child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
+                          duration: const Duration(milliseconds: 180),
                           padding: const EdgeInsets.symmetric(vertical: 10),
                           decoration: BoxDecoration(
                             color: active
@@ -104,13 +519,12 @@ class _NarratorScreenState extends State<NarratorScreen>
                             ),
                           ),
                           child: Text(
-                            s.name[0].toUpperCase() + s.name.substring(1),
+                            _styleName(s),
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: active
-                                  ? FontWeight.w700
-                                  : FontWeight.w400,
+                                  ? FontWeight.w700 : FontWeight.w400,
                               color: active
                                   ? AppColors.primary
                                   : AppColors.textSecondary,
@@ -122,65 +536,20 @@ class _NarratorScreenState extends State<NarratorScreen>
                   );
                 }).toList(),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 28),
 
-              // ── Chapters ────────────────────────────
-              const SectionHeader(title: 'Chapters'),
-              ..._chapters.map((ch) => _ChapterTile(
-                    chapter: ch,
-                    isActive: ch.index == _currentChapter,
-                    onTap: () => setState(() => _currentChapter = ch.index),
-                  )),
-              const SizedBox(height: 24),
-
-              // ── Playback speed ──────────────────────
-              const SectionHeader(title: 'Playback Speed'),
-              Row(
-                children: PlaybackSpeed.values.map((s) {
-                  final active = s == _speed;
-                  final label = switch (s) {
-                    PlaybackSpeed.slow => '0.75×',
-                    PlaybackSpeed.normal => '1.0×',
-                    PlaybackSpeed.fast => '1.5×',
-                  };
-                  return Expanded(
-                    child: Padding(
-                      padding: EdgeInsets.only(
-                          right: s != PlaybackSpeed.values.last ? 8 : 0),
-                      child: GestureDetector(
-                        onTap: () => setState(() => _speed = s),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          decoration: BoxDecoration(
-                            color: active
-                                ? AppColors.primary.withOpacity(0.15)
-                                : AppColors.bg3,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: active
-                                  ? AppColors.primary
-                                  : const Color(0xFF252840),
-                            ),
-                          ),
-                          child: Text(
-                            label,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: active
-                                  ? FontWeight.w700
-                                  : FontWeight.w400,
-                              color: active
-                                  ? AppColors.primary
-                                  : AppColors.textSecondary,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
+              // ── Generate button ──────────────────────────────────────────
+              ElevatedButton.icon(
+                onPressed: _isLoading ? null : _generateAndPlay,
+                icon: _isLoading
+                    ? const SizedBox(width: 18, height: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: AppColors.bg0))
+                    : const Icon(Icons.auto_awesome,
+                        size: 18, color: AppColors.bg0),
+                label: Text(_isLoading
+                    ? 'Generating narration…'
+                    : 'Generate & Play Narration'),
               ),
               const SizedBox(height: 32),
             ],
@@ -189,321 +558,53 @@ class _NarratorScreenState extends State<NarratorScreen>
       ),
     );
   }
+
+  String _styleName(VoiceStyle s) => switch (s) {
+    VoiceStyle.natural    => 'Natural',
+    VoiceStyle.poetic     => 'Poetic',
+    VoiceStyle.scientific => 'Scientific',
+  };
+
+  String _styleLabel(VoiceStyle s) => switch (s) {
+    VoiceStyle.natural    => 'Natural voice · Conversational',
+    VoiceStyle.poetic     => 'Poetic voice · Lyrical',
+    VoiceStyle.scientific => 'Scientific voice · Data-focused',
+  };
 }
 
-// ── Playback card ─────────────────────────────────────────────────────────────
-
-class _PlaybackCard extends StatelessWidget {
-  final _Chapter chapter;
-  final bool isPlaying;
+// ── Waveform painter ──────────────────────────────────────────────────────────
+class _WavePainter extends CustomPainter {
   final double progress;
-  final AnimationController waveCtrl;
-  final VoidCallback onPlayPause;
-  final VoidCallback? onPrev;
-  final VoidCallback? onNext;
-  final ValueChanged<double> onSeek;
-
-  const _PlaybackCard({
-    required this.chapter,
-    required this.isPlaying,
-    required this.progress,
-    required this.waveCtrl,
-    required this.onPlayPause,
-    required this.onPrev,
-    required this.onNext,
-    required this.onSeek,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppColors.bg2,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFF1E2235)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 6,
-                  height: 6,
-                  decoration: const BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: AppColors.primary,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  'NOW PLAYING',
-                  style: AppTypography.caption.copyWith(
-                    color: AppColors.primary,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text('Chapter ${chapter.index + 1}: ${chapter.title}',
-              style: AppTypography.heading3),
-          Text('Arctic Circle · ${chapter.era}',
-              style: AppTypography.bodySmall),
-          const SizedBox(height: 16),
-
-          // Waveform
-          _Waveform(controller: waveCtrl, isPlaying: isPlaying),
-          const SizedBox(height: 8),
-
-          // Progress
-          SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              thumbShape:
-                  const RoundSliderThumbShape(enabledThumbRadius: 6),
-              overlayShape:
-                  const RoundSliderOverlayShape(overlayRadius: 14),
-            ),
-            child: Slider(
-              value: progress,
-              onChanged: onSeek,
-            ),
-          ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                _formatDuration((progress * 310).round()),
-                style: AppTypography.caption,
-              ),
-              Text('5:10', style: AppTypography.caption),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          // Controls
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              IconButton(
-                onPressed: onPrev,
-                icon: Icon(
-                  Icons.skip_previous_rounded,
-                  size: 32,
-                  color: onPrev != null
-                      ? AppColors.textPrimary
-                      : AppColors.textMuted,
-                ),
-              ),
-              const SizedBox(width: 16),
-              GestureDetector(
-                onTap: onPlayPause,
-                child: Container(
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: AppColors.primary,
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.primary.withOpacity(0.4),
-                        blurRadius: 16,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Icon(
-                    isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                    size: 28,
-                    color: AppColors.bg0,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 16),
-              IconButton(
-                onPressed: onNext,
-                icon: Icon(
-                  Icons.skip_next_rounded,
-                  size: 32,
-                  color: onNext != null
-                      ? AppColors.textPrimary
-                      : AppColors.textMuted,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _formatDuration(int seconds) {
-    final m = seconds ~/ 60;
-    final s = seconds % 60;
-    return '$m:${s.toString().padLeft(2, '0')}';
-  }
-}
-
-// ── Animated Waveform ─────────────────────────────────────────────────────────
-
-class _Waveform extends StatelessWidget {
-  final AnimationController controller;
-  final bool isPlaying;
-
-  const _Waveform({required this.controller, required this.isPlaying});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 40,
-      child: AnimatedBuilder(
-        animation: controller,
-        builder: (context, _) {
-          return CustomPaint(
-            painter: _WaveformPainter(
-              progress: controller.value,
-              isPlaying: isPlaying,
-            ),
-            size: Size.infinite,
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _WaveformPainter extends CustomPainter {
-  final double progress;
-  final bool isPlaying;
-
-  _WaveformPainter({required this.progress, required this.isPlaying});
+  final bool   isPlaying;
+  _WavePainter({required this.progress, required this.isPlaying});
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..strokeWidth = 2
-      ..strokeCap = StrokeCap.round;
+      ..strokeWidth = 2.5
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
 
-    const bars = 40;
-    final barWidth = size.width / (bars * 2);
-    final rng = math.Random(42);
+    const bars   = 36;
+    final spacing = size.width / bars;
+    final rng    = math.Random(42);
 
     for (int i = 0; i < bars; i++) {
-      final x = i * barWidth * 2 + barWidth;
-      final baseH = rng.nextDouble() * size.height * 0.7 + size.height * 0.1;
-      final animated = isPlaying
-          ? baseH * (0.6 + 0.4 * math.sin(progress * math.pi * 2 + i * 0.4))
-          : baseH * 0.4;
-      final y1 = (size.height - animated) / 2;
-      final y2 = y1 + animated;
-
-      paint.color = AppColors.primary.withOpacity(0.7);
+      final x      = i * spacing + spacing / 2;
+      final baseH  = rng.nextDouble() * size.height * 0.6 + size.height * 0.1;
+      final h      = isPlaying
+          ? baseH * (0.5 + 0.5 * math.sin(
+              progress * math.pi * 2 + i * 0.5))
+          : baseH * 0.25;
+      final y1 = (size.height - h) / 2;
+      final y2 = y1 + h;
+      paint.color = AppColors.primary.withOpacity(
+          isPlaying ? 0.8 : 0.3);
       canvas.drawLine(Offset(x, y1), Offset(x, y2), paint);
     }
   }
 
   @override
-  bool shouldRepaint(_WaveformPainter old) =>
+  bool shouldRepaint(_WavePainter old) =>
       old.progress != progress || old.isPlaying != isPlaying;
-}
-
-// ── Chapter tile ──────────────────────────────────────────────────────────────
-
-class _Chapter {
-  final int index;
-  final String title;
-  final String era;
-  final bool done;
-
-  const _Chapter({
-    required this.index,
-    required this.title,
-    required this.era,
-    required this.done,
-  });
-}
-
-class _ChapterTile extends StatelessWidget {
-  final _Chapter chapter;
-  final bool isActive;
-  final VoidCallback onTap;
-
-  const _ChapterTile({
-    required this.chapter,
-    required this.isActive,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: isActive ? AppColors.primary.withOpacity(0.08) : AppColors.bg2,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isActive
-                ? AppColors.primary.withOpacity(0.3)
-                : const Color(0xFF1E2235),
-          ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: chapter.done
-                    ? AppColors.good.withOpacity(0.2)
-                    : isActive
-                        ? AppColors.primary.withOpacity(0.2)
-                        : AppColors.bg3,
-              ),
-              child: Center(
-                child: chapter.done
-                    ? const Icon(Icons.check, size: 16, color: AppColors.good)
-                    : Text(
-                        '${chapter.index + 1}',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: isActive
-                              ? AppColors.primary
-                              : AppColors.textSecondary,
-                        ),
-                      ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(chapter.title, style: AppTypography.heading3),
-                  Text(
-                    isActive ? '5:10 · Playing' : '4:22 · ${chapter.era}',
-                    style: AppTypography.bodySmall,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }

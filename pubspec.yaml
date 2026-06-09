@@ -30,7 +30,11 @@ dependencies:
 
   # NOTE: google_maps_flutter removed — add back in Milestone 2
   # after setting up Maps API key in AndroidManifest.xml
-
+  #audio (android)
+  audioplayers: ^6.0.0
+  #charts(for insights)
+  fl_chart: ^0.68.0
+  
   cupertino_icons: ^1.0.6
 
 dev_dependencies:
