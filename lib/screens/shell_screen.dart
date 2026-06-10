@@ -1,20 +1,10 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
-import '../utils/app_routes.dart';
 import 'exploare_screen.dart';
 import 'timeline_screen.dart';
 import 'narrator_screen.dart';
-import 'kml_map_screen.dart';
+import 'story_mode_screen.dart';
 import 'settings_screen.dart';
-
-class ExploreScreen extends StatelessWidget {
-  const ExploreScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const SizedBox.shrink();
-  }
-}
 
 class ShellScreen extends StatefulWidget {
   const ShellScreen({super.key});
@@ -24,13 +14,13 @@ class ShellScreen extends StatefulWidget {
 }
 
 class _ShellScreenState extends State<ShellScreen> {
-  int _currentIndex = NavTab.explore;
+  int _currentIndex = 0;
 
-  final List<Widget> _screens = [
+  final List<Widget> _screens = const [
     ExploreScreen(),
     TimelineScreen(),
     NarratorScreen(),
-    KmlMapScreen(),
+    StoryModeScreen(),
     SettingsScreen(),
   ];
 
@@ -60,7 +50,8 @@ class _BottomNav extends StatelessWidget {
     return Container(
       decoration: const BoxDecoration(
         color: AppColors.bg1,
-        border: Border(top: BorderSide(color: Color(0xFF1A1E2E), width: 1)),
+        border: Border(
+            top: BorderSide(color: Color(0xFF1A1E2E), width: 1)),
       ),
       child: SafeArea(
         top: false,
@@ -69,6 +60,12 @@ class _BottomNav extends StatelessWidget {
           onTap: onTap,
           backgroundColor: Colors.transparent,
           elevation: 0,
+          type: BottomNavigationBarType.fixed,
+          selectedItemColor: AppColors.primary,
+          unselectedItemColor: AppColors.textMuted,
+          selectedLabelStyle: const TextStyle(
+              fontSize: 11, fontWeight: FontWeight.w600),
+          unselectedLabelStyle: const TextStyle(fontSize: 11),
           items: const [
             BottomNavigationBarItem(
               icon: Icon(Icons.explore_outlined),
@@ -86,9 +83,9 @@ class _BottomNav extends StatelessWidget {
               label: 'Narrator',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.map_outlined),
-              activeIcon: Icon(Icons.map),
-              label: 'KML Map',
+              icon: Icon(Icons.auto_stories_outlined),
+              activeIcon: Icon(Icons.auto_stories),
+              label: 'Story',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.settings_outlined),
