@@ -5,25 +5,6 @@ import '../models/app_models.dart';
 import '../widgets/shared_widgets.dart';
 import '../services/lg_ssh_service.dart';
 
-/// FEATURE: Settings Screen + LG Connect with real QR scanner
-///
-/// PURPOSE:
-/// Settings tab shows LG connection status + link to API setup.
-/// LGConnectScreen has 2 tabs: Manual IP entry + QR Scanner.
-///
-/// QR SCANNER:
-/// Uses mobile_scanner package — works on Android camera AND
-/// Chrome web (browser camera permission).
-/// Expected QR format on LG rig: "lg://192.168.x.x:22"
-///   or just plain IP "192.168.x.x"
-///
-/// HOW IT WORKS:
-///   1. User taps QR Scan tab
-///   2. Camera opens via MobileScanner widget
-///   3. onDetect callback fires when QR is found
-///   4. We parse the string → extract IP + port
-///   5. Auto-fill the Manual tab fields
-///   6. Switch to Manual tab so user can verify before connecting
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
@@ -745,9 +726,6 @@ class _CornerPainter extends CustomPainter {
   bool shouldRepaint(_CornerPainter old) => false;
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// API SETUP SCREEN (unchanged from before — kept for completeness)
-// ════════════════════════════════════════════════════════════════════════════
 
 class ApiSetupScreen extends StatefulWidget {
   const ApiSetupScreen({super.key});
