@@ -43,3 +43,7 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+
+# Web — API keys (NEVER COMMIT)
+web/maps_api_key.js

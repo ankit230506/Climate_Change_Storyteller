@@ -2,50 +2,53 @@
 <html>
 <head>
   <base href="$FLUTTER_BASE_HREF">
-
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="Climate Change Storytelling Visualizer — GSoC 2026 Liquid Galaxy Project">
-
-  <!-- iOS meta tags & icons -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="Climate Storyteller">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
-
-  <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
-
   <title>Climate Storyteller</title>
   <link rel="manifest" href="manifest.json">
 
-
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBKJK-aXwCxyUt6bptRe4fvpcjPsQIRdBo"
-          async defer></script>
+      
+  <script src="maps_api_key.js"></script>
+  <script>
+    // maps_api_key.js defines window.MAPS_API_KEY
+    // Fallback to empty string if file is missing (map won't load,
+    // but app won't crash either)
+    (function() {
+      const key = window.MAPS_API_KEY || '';
+      if (!key) {
+        console.warn(
+          '[Climate Storyteller] No Maps API key found. ' +
+          'Copy web/maps_api_key.example.js to web/maps_api_key.js ' +
+          'and add your key. Map will not render until then.'
+        );
+      }
+      const script = document.createElement('script');
+      script.src = 'https://maps.googleapis.com/maps/api/js?key=' + key;
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    })();
+  </script>
 
   <style>
-    /* Prevent white flash before Flutter loads */
-    html, body {
-      background-color: #07080F;
-      height: 100%;
-    }
+    html, body { background-color: #07080F; height: 100%; }
     #loading {
-      position: fixed;
-      inset: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: #07080F;
-      color: #00C4A0;
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: #07080F; color: #00C4A0;
       font-family: -apple-system, sans-serif;
-      font-size: 14px;
-      letter-spacing: 1px;
+      font-size: 14px; letter-spacing: 1px;
     }
   </style>
 </head>
 <body>
   <div id="loading">Loading Climate Storyteller…</div>
-
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
