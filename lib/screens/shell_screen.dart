@@ -4,6 +4,7 @@ import 'exploare_screen.dart';
 import 'timeline_screen.dart';
 import 'narrator_screen.dart';
 import 'story_mode_screen.dart';
+import 'data_insight_screen.dart';
 import 'settings_screen.dart';
 
 class ShellScreen extends StatefulWidget {
@@ -17,11 +18,12 @@ class _ShellScreenState extends State<ShellScreen> {
   int _currentIndex = 0;
 
   final List<Widget> _screens = const [
-    ExploreScreen(),
-    TimelineScreen(),
-    NarratorScreen(),
-    StoryModeScreen(),
-    SettingsScreen(),
+    ExploreScreen(),       
+    TimelineScreen(),      
+    NarratorScreen(),      
+    DataInsightsScreen(),  
+    StoryModeScreen(),     
+    SettingsScreen(),      
   ];
 
   @override
@@ -42,7 +44,6 @@ class _ShellScreenState extends State<ShellScreen> {
 class _BottomNav extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
-
   const _BottomNav({required this.currentIndex, required this.onTap});
 
   @override
@@ -50,8 +51,8 @@ class _BottomNav extends StatelessWidget {
     return Container(
       decoration: const BoxDecoration(
         color: AppColors.bg1,
-        border: Border(
-            top: BorderSide(color: Color(0xFF1A1E2E), width: 1)),
+        border: Border(top: BorderSide(
+            color: Color(0xFF1A1E2E), width: 1)),
       ),
       child: SafeArea(
         top: false,
@@ -64,8 +65,8 @@ class _BottomNav extends StatelessWidget {
           selectedItemColor: AppColors.primary,
           unselectedItemColor: AppColors.textMuted,
           selectedLabelStyle: const TextStyle(
-              fontSize: 11, fontWeight: FontWeight.w600),
-          unselectedLabelStyle: const TextStyle(fontSize: 11),
+              fontSize: 10, fontWeight: FontWeight.w600),
+          unselectedLabelStyle: const TextStyle(fontSize: 10),
           items: const [
             BottomNavigationBarItem(
               icon: Icon(Icons.explore_outlined),
@@ -81,6 +82,11 @@ class _BottomNav extends StatelessWidget {
               icon: Icon(Icons.record_voice_over_outlined),
               activeIcon: Icon(Icons.record_voice_over),
               label: 'Narrator',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.bar_chart_outlined),
+              activeIcon: Icon(Icons.bar_chart),
+              label: 'Insights',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.auto_stories_outlined),
