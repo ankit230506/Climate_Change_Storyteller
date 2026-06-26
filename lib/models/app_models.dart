@@ -1,3 +1,5 @@
+const _sentinel = Object();
+
 /// Represents the connection state of the Liquid Galaxy rig.
 enum LGConnectionStatus { disconnected, connecting, connected, error }
 
@@ -13,7 +15,7 @@ class LGRigState {
   const LGRigState({
     this.status = LGConnectionStatus.disconnected,
     this.ipAddress,
-    this.port = 2222,
+    this.port = 22,
     this.screenCount = 5,
     this.latencyMs,
     this.currentKml,
@@ -28,8 +30,8 @@ class LGRigState {
     int? port,
     int? screenCount,
     int? latencyMs,
-    String? currentKml,
-    String? errorMessage,
+    Object? currentKml = _sentinel,
+    Object? errorMessage = _sentinel,
   }) {
     return LGRigState(
       status: status ?? this.status,
@@ -37,8 +39,8 @@ class LGRigState {
       port: port ?? this.port,
       screenCount: screenCount ?? this.screenCount,
       latencyMs: latencyMs ?? this.latencyMs,
-      currentKml: currentKml ?? this.currentKml,
-      errorMessage: errorMessage ?? this.errorMessage,
+      currentKml: currentKml == _sentinel ? this.currentKml : currentKml as String?,
+      errorMessage: errorMessage == _sentinel ? this.errorMessage : errorMessage as String?,
     );
   }
 

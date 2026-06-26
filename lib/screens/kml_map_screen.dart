@@ -1,8 +1,11 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../models/app_models.dart';
 import '../widgets/shared_widgets.dart';
 import '../services/lg_ssh_service.dart';
+import '../services/kml_builder_service.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // KML MAP SCREEN
@@ -22,6 +25,12 @@ class _KmlMapScreenState extends State<KmlMapScreen> {
 
   static const _pollutants = ['AQI', 'PM2.5', 'NO₂', 'PM10', 'O3'];
 
+  @override
+  void initState() {
+    super.initState();
+    _selected = kDefaultRegions.first;
+  }
+
   Future<void> _sendToLG() async {
     if (_selected == null) return;
     final ssh = LGSSHService.instance;
@@ -33,15 +42,51 @@ class _KmlMapScreenState extends State<KmlMapScreen> {
       );
       return;
     }
-    final file = _selected!.kmlFiles[_era]!;
-    await ssh.sendKml(file);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Sent $file'),
-          backgroundColor: AppColors.primary.withOpacity(0.9),
-        ),
+
+    try {
+      String kmlContent = '';
+      if (!kIsWeb) {
+        final kmlPath = await KmlBuilderService.instance.buildKml(
+          region: _selected!,
+          era: _era,
+        );
+        kmlContent = await File(kmlPath).readAsString();
+      }
+
+      final file = _selected!.kmlFiles[_era];
+      if (file == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No KML file for this era')),
+        );
+        return;
+      }
+
+      await ssh.sendKml(file, kmlContent: kmlContent.isNotEmpty ? kmlContent : null);
+
+      await ssh.flyTo(
+        latitude: _selected!.latitude,
+        longitude: _selected!.longitude,
+        altitude: _selected!.altitude,
       );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Sent $file and flew to region'),
+            backgroundColor: AppColors.primary.withOpacity(0.9),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: AppColors.critical,
+          ),
+        );
+      }
     }
   }
 

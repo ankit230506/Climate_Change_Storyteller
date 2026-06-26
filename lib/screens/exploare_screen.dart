@@ -1,47 +1,24 @@
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'dart:ui' as ui;
 import '../theme/app_theme.dart';
 import '../models/app_models.dart';
 import '../widgets/shared_widgets.dart';
 import '../services/lg_ssh_service.dart';
 
-/// FEATURE: Explore Screen — Real Google Map
-///
-/// PURPOSE:
-/// Replaces the globe placeholder with an interactive Google Map.
-/// Shows 6 colored markers for each climate region.
-/// Tapping a marker selects that region and shows its info card.
-///
-/// SETUP REQUIRED:
-///   1. Get a free API key: console.cloud.google.com
-///   2. Enable "Maps JavaScript API" (for web) and
-///      "Maps SDK for Android" (for Android)
-///   3. Add the key to:
-///      - web/index.html (for Chrome)
-///      - android/app/src/main/AndroidManifest.xml (for Android)
-///
-/// WHY GoogleMap widget:
-/// google_maps_flutter is the official Flutter package, works on
-/// both Android and Web (with the JS API key configured).
 class ExploreScreen extends StatefulWidget {
   const ExploreScreen({super.key});
-
   @override
   State<ExploreScreen> createState() => _ExploreScreenState();
 }
 
 class _ExploreScreenState extends State<ExploreScreen> {
-  String         _category    = 'All';
+  String         _category = 'All';
   ClimateRegion? _selected;
-  GoogleMapController? _mapController;
+  final _mapController = MapController();
 
-  static const _cats = ['All', 'Glaciers', 'Sea Level', 'Forests', 'Heat'];
-
-  // ── Initial camera position — centered on world ──────────────────────────
-  static const _initialCamera = CameraPosition(
-    target: LatLng(15, 30),
-    zoom: 1.6,
-  );
+  static const _cats = ['All','Glaciers','Sea Level','Forests','Heat'];
 
   List<ClimateRegion> get _filtered {
     if (_category == 'All') return kDefaultRegions;
@@ -55,7 +32,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
     return kDefaultRegions.where((r) => r.category == cat).toList();
   }
 
-  Color _catColor(String cat) => switch (cat) {
+  Color _catColor(String c) => switch (c) {
     'glacier'  => AppColors.glacier,
     'sealevel' => AppColors.seaLevel,
     'forest'   => AppColors.forest,
@@ -63,7 +40,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
     _          => AppColors.textSecondary,
   };
 
-  IconData _catIcon(String cat) => switch (cat) {
+  IconData _catIcon(String c) => switch (c) {
     'glacier'  => Icons.ac_unit,
     'sealevel' => Icons.water,
     'forest'   => Icons.forest,
@@ -71,47 +48,14 @@ class _ExploreScreenState extends State<ExploreScreen> {
     _          => Icons.place,
   };
 
-  // ── Convert category color to Google Maps marker hue ────────────────────
-  // BitmapDescriptor only accepts hue values 0-360, not arbitrary colors
-  double _catHue(String cat) => switch (cat) {
-    'glacier'  => BitmapDescriptor.hueAzure,
-    'sealevel' => BitmapDescriptor.hueCyan,
-    'forest'   => BitmapDescriptor.hueGreen,
-    'heat'     => BitmapDescriptor.hueOrange,
-    _          => BitmapDescriptor.hueRed,
-  };
-
-  // ── Build markers from filtered regions ──────────────────────────────────
-  Set<Marker> get _markers {
-    return _filtered.map((region) {
-      final isSelected = _selected?.id == region.id;
-      return Marker(
-        markerId: MarkerId(region.id),
-        position: LatLng(region.latitude, region.longitude),
-        icon: BitmapDescriptor.defaultMarkerWithHue(
-            _catHue(region.category)),
-        infoWindow: InfoWindow(
-          title: region.name,
-          snippet: '${region.category} · ${region.riskLevel ?? ''}',
-        ),
-        onTap: () => setState(() => _selected = region),
-        zIndex: isSelected ? 2 : 1,
-      );
-    }).toSet();
+  void _onRegionTap(ClimateRegion region) {
+    setState(() => _selected = region);
+    _mapController.move(
+      LatLng(region.latitude, region.longitude), 4,
+    );
   }
 
-  void _flyToRegion(ClimateRegion region) async {
-    // Animate Flutter map camera to region first
-    await _mapController?.animateCamera(
-      CameraUpdate.newCameraPosition(
-        CameraPosition(
-          target: LatLng(region.latitude, region.longitude),
-          zoom: 4,
-        ),
-      ),
-    );
-
-    // Then send command to LG rig if connected
+  void _flyToLG(ClimateRegion region) async {
     final ssh = LGSSHService.instance;
     if (!ssh.state.isConnected) {
       if (!mounted) return;
@@ -121,13 +65,11 @@ class _ExploreScreenState extends State<ExploreScreen> {
       ));
       return;
     }
-
     await ssh.flyTo(
-      latitude:  region.latitude,
+      latitude: region.latitude,
       longitude: region.longitude,
-      altitude:  region.altitude,
+      altitude: region.altitude,
     );
-
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('Flying to ${region.name} on LG…'),
@@ -144,15 +86,14 @@ class _ExploreScreenState extends State<ExploreScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-
-            // ── Header ────────────────────────────────────────────────
+            // ── Header ──────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('Explore', style: AppTypography.heading1),
-                  Text('Tap a region to begin',
+                  Text('Select a climate region to begin',
                       style: AppTypography.bodySmall),
                 ],
               ),
@@ -202,37 +143,50 @@ class _ExploreScreenState extends State<ExploreScreen> {
             ),
             const SizedBox(height: 12),
 
-            // ── Google Map ────────────────────────────────────────────
+            // ── flutter_map ──────────────────────────────────────────
             Expanded(
               flex: 3,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(16),
-                  child: Stack(
+                  child: FlutterMap(
+                    mapController: _mapController,
+                    options: const MapOptions(
+                      initialCenter: LatLng(20, 30),
+                      initialZoom: 1.8,
+                    ),
                     children: [
-                      GoogleMap(
-                        initialCameraPosition: _initialCamera,
-                        markers: _markers,
-                        onMapCreated: (c) => _mapController = c,
-                        mapType: MapType.satellite,
-                        zoomControlsEnabled: false,
-                        myLocationButtonEnabled: false,
-                        style: _darkMapStyle, // dark theme JSON
+                      // Real OSM tiles
+                      TileLayer(
+                        urlTemplate:
+                            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        userAgentPackageName:
+                            'com.example.climate_storyteller',
                       ),
 
-                      // Gradient overlay at edges for visual polish
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                  color: const Color(0xFF1A2035),
-                                  width: 1),
-                              borderRadius: BorderRadius.circular(16),
+                      // Proper pin markers
+                      MarkerLayer(
+                        markers: _filtered.map((region) {
+                          final color    = _catColor(region.category);
+                          final selected = _selected?.id == region.id;
+                          return Marker(
+                            point: LatLng(
+                                region.latitude, region.longitude),
+                            width:  selected ? 50 : 40,
+                            height: selected ? 60 : 50,
+                            alignment: Alignment.topCenter,
+                            child: GestureDetector(
+                              onTap: () => _onRegionTap(region),
+                              child: _MapPin(
+                                color: color,
+                                icon: _catIcon(region.category),
+                                isSelected: selected,
+                                label: region.name.split(' ').first,
+                              ),
                             ),
-                          ),
-                        ),
+                          );
+                        }).toList(),
                       ),
                     ],
                   ),
@@ -253,7 +207,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
             ),
             const SizedBox(height: 12),
 
-            // ── Selected region card / region list ───────────────────
+            // ── Region list ───────────────────────────────────────────
             Expanded(
               flex: 2,
               child: SingleChildScrollView(
@@ -265,9 +219,9 @@ class _ExploreScreenState extends State<ExploreScreen> {
                     const SizedBox(height: 10),
                     ..._filtered.map((r) {
                       final selected = _selected?.id == r.id;
-                      final color = _catColor(r.category);
+                      final color    = _catColor(r.category);
                       return GestureDetector(
-                        onTap: () => setState(() => _selected = r),
+                        onTap: () => _onRegionTap(r),
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 200),
                           margin: const EdgeInsets.only(bottom: 8),
@@ -296,8 +250,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                             ),
                             const SizedBox(width: 12),
                             Expanded(child: Column(
-                              crossAxisAlignment:
-                                  CrossAxisAlignment.start,
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(r.name, style: const TextStyle(
                                   fontSize: 14,
@@ -307,8 +260,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                                 Text(
                                   '${r.latitude.toStringAsFixed(1)}°, '
                                   '${r.longitude.toStringAsFixed(1)}°',
-                                  style: AppTypography.bodySmall,
-                                ),
+                                  style: AppTypography.bodySmall),
                               ],
                             )),
                             if (r.riskLevel != null)
@@ -334,10 +286,10 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 height: 54, width: double.infinity,
                 child: ElevatedButton.icon(
                   onPressed: _selected != null
-                      ? () => _flyToRegion(_selected!)
+                      ? () => _flyToLG(_selected!)
                       : null,
-                  icon: const Icon(Icons.public, size: 18,
-                      color: AppColors.bg0),
+                  icon: const Icon(Icons.public,
+                      size: 18, color: AppColors.bg0),
                   label: Text(_selected != null
                       ? 'Fly to ${_selected!.name} on LG'
                       : 'Select a Region Above'),
@@ -356,28 +308,94 @@ class _ExploreScreenState extends State<ExploreScreen> {
       Container(width: 8, height: 8,
           decoration: BoxDecoration(shape: BoxShape.circle, color: c)),
       const SizedBox(width: 4),
-      Text(label, style: AppTypography.caption
-          .copyWith(letterSpacing: 0.3)),
+      Text(label, style: AppTypography.caption.copyWith(letterSpacing: 0.3)),
     ],
   );
 }
 
-// ── Dark map style JSON ─────────────────────────────────────────────────────
-// WHY: Default Google Maps is light/colorful. This JSON makes it match
-// our dark theme. Generated via mapstyle.withgoogle.com
-const String _darkMapStyle = '''
-[
-  {"elementType":"geometry","stylers":[{"color":"#0e1018"}]},
-  {"elementType":"labels.text.stroke","stylers":[{"color":"#0e1018"}]},
-  {"elementType":"labels.text.fill","stylers":[{"color":"#8892AA"}]},
-  {"featureType":"administrative","elementType":"geometry",
-   "stylers":[{"color":"#1c2035"}]},
-  {"featureType":"poi","stylers":[{"visibility":"off"}]},
-  {"featureType":"road","stylers":[{"visibility":"off"}]},
-  {"featureType":"transit","stylers":[{"visibility":"off"}]},
-  {"featureType":"water","elementType":"geometry",
-   "stylers":[{"color":"#0a1830"}]},
-  {"featureType":"landscape","elementType":"geometry",
-   "stylers":[{"color":"#161824"}]}
-]
-''';
+// ── Proper map pin widget ─────────────────────────────────────────────────────
+class _MapPin extends StatelessWidget {
+  final Color    color;
+  final IconData icon;
+  final bool     isSelected;
+  final String   label;
+
+  const _MapPin({
+    required this.color,
+    required this.icon,
+    required this.isSelected,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Label above pin (only when selected)
+        if (isSelected)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+              ),
+            ),
+          ),
+
+        // Pin head (circle with icon)
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width:  isSelected ? 36 : 30,
+          height: isSelected ? 36 : 30,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: color,
+            border: Border.all(color: Colors.white, width: 2),
+            boxShadow: [
+              BoxShadow(
+                color: color.withOpacity(0.5),
+                blurRadius: isSelected ? 12 : 4,
+                spreadRadius: isSelected ? 2 : 0,
+              ),
+            ],
+          ),
+          child: Icon(icon, color: Colors.white,
+              size: isSelected ? 18 : 14),
+        ),
+
+        // Pin tail (triangle pointer)
+        CustomPaint(
+          size: const Size(10, 6),
+          painter: _PinTailPainter(color: color),
+        ),
+      ],
+    );
+  }
+}
+
+class _PinTailPainter extends CustomPainter {
+  final Color color;
+  _PinTailPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = color..style = PaintingStyle.fill;
+    final path = ui.Path();
+    path.moveTo(0, 0);
+    path.lineTo(size.width / 2, size.height);
+    path.lineTo(size.width, 0);
+    path.close();
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(_PinTailPainter old) => old.color != color;
+}

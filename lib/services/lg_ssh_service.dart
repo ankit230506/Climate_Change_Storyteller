@@ -9,6 +9,7 @@ class LGSSHService {
   static final LGSSHService instance = LGSSHService._();
 
   SSHClient? _client;
+  String _password = 'lg';
   LGRigState _state = const LGRigState();
   final _stateCtrl = StreamController<LGRigState>.broadcast();
   Timer? _keepaliveTimer;
@@ -23,8 +24,9 @@ class LGSSHService {
     required String ipAddress,
     int port = 22,
     String username = 'lg',
-    String password = 'lq',
+    String password = 'lg',
   }) async {
+    _password = password;
     _update(_state.copyWith(status: LGConnectionStatus.connecting));
 
     try {
@@ -110,7 +112,7 @@ class LGSSHService {
       throw Exception('Not connected to LG rig');
     }
     final result = await _client!.run(command);
-    return String.fromCharCodes(result);
+    return utf8.decode(result);
   }
 
   // ── KML ────────────────────────────────────────────────────────────────────
@@ -133,7 +135,7 @@ class LGSSHService {
 
     for (int i = 2; i <= _state.screenCount; i++) {
       await execute(
-        'sshpass -p lq ssh -o StrictHostKeyChecking=no '
+        'sshpass -p $_password ssh -o StrictHostKeyChecking=no '
         'lg@lg$i "echo \'$escaped\' > '
         '/var/www/html/kml/slave_$i.kml"',
       );
@@ -176,7 +178,7 @@ class LGSSHService {
     await execute("echo '' > /var/www/html/kmls/active.kml");
     for (int i = 2; i <= _state.screenCount; i++) {
       await execute(
-        'sshpass -p lq ssh -o StrictHostKeyChecking=no '
+        'sshpass -p $_password ssh -o StrictHostKeyChecking=no '
         'lg@lg$i "echo \'\' > /var/www/html/kml/slave_$i.kml"',
       );
     }
@@ -188,7 +190,7 @@ class LGSSHService {
     if (_client == null) throw Exception('Not connected');
     for (int i = _state.screenCount; i >= 1; i--) {
       await execute(
-        'sshpass -p lq ssh -o StrictHostKeyChecking=no lg@lg$i '
+        'sshpass -p $_password ssh -o StrictHostKeyChecking=no lg@lg$i '
         '"DISPLAY=:0 /home/lg/target/lg$i/run.sh '
         '>> /home/lg/log.txt 2>&1 &"',
       );
@@ -201,7 +203,7 @@ class LGSSHService {
     try {
       final result = await execute(
         'for i in 2 3 4 5 6 7; do '
-        'sshpass -p lq ssh -o StrictHostKeyChecking=no '
+        'sshpass -p $_password ssh -o StrictHostKeyChecking=no '
         '-o ConnectTimeout=2 lg@lg\$i '
         '"echo ok" 2>/dev/null && echo "ok\$i"; done',
       );
@@ -244,7 +246,7 @@ class LGSSHService {
   }
 
   void dispose() {
-    _keepaliveTimer?.cancel();
-    _stateCtrl.close();
+    _client?.close();
+    _client = null;
   }
 }

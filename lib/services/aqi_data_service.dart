@@ -1,12 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
-/// Fetches real-time and historical air quality data from OpenAQ.
-/// NO API KEY NEEDED — completely free and open.
-///
-/// WHY HERE: AQI data is separate from climate data because it feeds
-/// specifically the KML Map screen's heatmap layer, not the timeline.
-/// OpenAQ: https://api.openaq.org/v2/
 class AqiDataService {
   AqiDataService._();
   static final AqiDataService instance = AqiDataService._();
@@ -30,11 +24,6 @@ class AqiDataService {
   // FETCH AQI FOR A CITY
   // ════════════════════════════════════════════════════════════════════════
 
-  /// Returns latest AQI readings for a city.
-  /// Called by: KmlMapScreen to build color-coded heatmap KML
-  ///
-  /// API: GET /measurements?city=Delhi&parameter=pm25&limit=10
-  /// Returns list of AqiReading objects
   Future<List<AqiReading>> fetchCityAqi(String city) async {
     final cached = _getCache(city);
     if (cached != null) return cached;
@@ -90,9 +79,6 @@ class AqiDataService {
   // BUILD AQI KML — color-coded polygons for LG heatmap
   // ════════════════════════════════════════════════════════════════════════
 
-  /// Converts AQI readings into a KML string with colored polygons.
-  /// Each city gets a polygon colored by AQI level.
-  /// Called by: KmlMapScreen → sendKml() → LG rig
   String buildAqiKml(Map<String, List<AqiReading>> cityData, String era) {
     final placemarks = cityData.entries.map((entry) {
       final city     = entry.key;
@@ -101,8 +87,8 @@ class AqiDataService {
           .where((r) => r.parameter == 'pm25')
           .map((r) => r.value)
           .fold(0.0, (a, b) => a + b);
-      final avgPm25  = readings.isEmpty ? 0.0
-          : pm25 / readings.where((r) => r.parameter == 'pm25').length;
+      final pm25Count = readings.where((r) => r.parameter == 'pm25').length;
+      final avgPm25  = pm25Count == 0 ? 0.0 : pm25 / pm25Count;
 
       final aqiLevel = _pm25ToAqi(avgPm25);
       final color    = _aqiColor(aqiLevel);
@@ -119,11 +105,11 @@ class AqiDataService {
       ]]></description>
       <Style>
         <PolyStyle>
-          <color>${color}aa</color>
+          <color>${color}</color>
           <outline>1</outline>
         </PolyStyle>
         <LineStyle>
-          <color>ff${color.substring(2)}</color>
+          <color>${color}</color>
           <width>1.5</width>
         </LineStyle>
       </Style>

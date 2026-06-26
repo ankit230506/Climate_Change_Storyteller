@@ -246,13 +246,15 @@ class _IceExtentChart extends StatelessWidget {
     final entries = kArcticIceExtent.entries.toList()
       ..sort((a, b) => a.key.compareTo(b.key));
 
+    final barWidth = entries.length > 15 ? 10.0 : 18.0;
+
     final groups = entries.asMap().entries.map((e) {
-      final t     = e.key / (entries.length - 1);
+      final t     = entries.length > 1 ? e.key / (entries.length - 1) : 0.0;
       final color = Color.lerp(AppColors.glacier, AppColors.critical, t)!;
       return BarChartGroupData(x: e.key, barRods: [
         BarChartRodData(
-          toY: e.value.value / 1e6, color: color,
-          width: 18,
+          toY: e.value.value, color: color,
+          width: barWidth,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
         ),
       ]);
@@ -285,7 +287,7 @@ class _IceExtentChart extends StatelessWidget {
                   showTitles: true,
                   getTitlesWidget: (v, _) {
                     final i = v.toInt();
-                    if (i >= entries.length) return const SizedBox.shrink();
+                    if (i < 0 || i >= entries.length) return const SizedBox.shrink();
                     final year = entries[i].key;
                     if (![1900, 1950, 2000, 2026, 2050, 2100].contains(year)) {
                       return const SizedBox.shrink();
@@ -307,6 +309,7 @@ class _IceExtentChart extends StatelessWidget {
                 touchTooltipData: BarTouchTooltipData(
                   getTooltipColor: (_) => AppColors.bg2,
                   getTooltipItem: (group, _, rod, __) {
+                    if (group.x < 0 || group.x >= entries.length) return null;
                     final year = entries[group.x].key;
                     return BarTooltipItem(
                       '$year\n${rod.toY.toStringAsFixed(1)}M km²',

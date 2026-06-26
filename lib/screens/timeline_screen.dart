@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../models/app_models.dart';
@@ -43,7 +44,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   Future<void> _loadStats() async {
     setState(() => _statsLoading = true);
     try {
-      final year  = int.parse(_era.label);
+      final year  = int.tryParse(_era.label) ?? DateTime.now().year;
       final stats = await ClimateDataService.instance
           .getStatsForYear(year);
       if (mounted) setState(() => _stats = stats);
@@ -71,7 +72,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
         region: _region, era: _era);
 
       setState(() => _statusMsg = 'Uploading to rig…');
-      final kmlContent = await File(kmlPath).readAsString();
+      String kmlContent = '';
+      if (!kIsWeb) {
+        kmlContent = await File(kmlPath).readAsString();
+      }
       final filename   = '${_region.id}_${_era.label}.kml';
       await ssh.sendKml(filename, kmlContent: kmlContent);
 

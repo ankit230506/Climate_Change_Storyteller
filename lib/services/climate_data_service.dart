@@ -178,7 +178,7 @@ class ClimateDataService {
       print('[ClimateDataService] NSIDC ice fetch failed: $e — using IPCC fallback');
     }
 
-    return _interpolateIpcc(kArcticIceExtent, DateTime.now().year) / 1e6;
+    return _interpolateIpcc(kArcticIceExtent, DateTime.now().year);
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -195,7 +195,7 @@ class ClimateDataService {
         year:          1900,
         tempAnomaly:   kTemperatureAnomaly[1900]!,
         seaLevelMm:    kSeaLevelRise[1900]!,
-        iceExtentMkm2: kArcticIceExtent[1900]! / 1e6,
+        iceExtentMkm2: kArcticIceExtent[1900]!,
         forestLossPct: kForestCoverLoss[1900]!,
         source:        'IPCC AR6 historical baseline',
       );
@@ -207,7 +207,7 @@ class ClimateDataService {
         year:          2100,
         tempAnomaly:   kTemperatureAnomaly[2100]!,
         seaLevelMm:    kSeaLevelRise[2100]!,
-        iceExtentMkm2: kArcticIceExtent[2100]! / 1e6,
+        iceExtentMkm2: kArcticIceExtent[2100]!,
         forestLossPct: kForestCoverLoss[2100]!,
         source:        'IPCC AR6 SSP3-7.0 projection',
       );
@@ -286,7 +286,7 @@ class ClimateStats {
     required this.source,
   });
 
-  String get tempLabel    => '+${tempAnomaly.toStringAsFixed(1)}°C';
+  String get tempLabel    => '${tempAnomaly >= 0 ? '+' : ''}${tempAnomaly.toStringAsFixed(1)}°C';
   String get seaLabel     => '${seaLevelMm.toStringAsFixed(0)} mm';
   String get iceLabel     => '${iceExtentMkm2.toStringAsFixed(1)} M km²';
   String get forestLabel  => '${forestLossPct.toStringAsFixed(1)}% lost';

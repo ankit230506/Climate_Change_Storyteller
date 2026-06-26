@@ -3,6 +3,7 @@ import '../theme/app_theme.dart';
 import '../models/app_models.dart';
 import '../widgets/shared_widgets.dart';
 import '../services/lg_ssh_service.dart';
+import '../services/secure_storage_service.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // REGION DETAIL SCREEN
@@ -183,6 +184,12 @@ class _ApiSetupScreenState extends State<ApiSetupScreen> {
   bool _obscure = true;
 
   @override
+  void dispose() {
+    _geminiCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg0,
@@ -277,7 +284,11 @@ class _ApiSetupScreenState extends State<ApiSetupScreen> {
 
               ElevatedButton(
                 onPressed: _geminiSet
-                    ? () => Navigator.pop(context)
+                    ? () async {
+                        await SecureStorageService.instance.saveGeminiKey(_geminiCtrl.text);
+                        if (!mounted) return;
+                        Navigator.pop(context);
+                      }
                     : null,
                 child: const Text('Save & Continue'),
               ),

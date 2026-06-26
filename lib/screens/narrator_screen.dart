@@ -38,13 +38,7 @@ class _NarratorScreenState extends State<NarratorScreen>
   String?       _narrationText;
   String?       _errorMsg;
   double        _progress  = 0.0;
-  Duration      _total     = Duration.zero;
-  Duration      _position  = Duration.zero;
   bool          _hasApiKey = false;
-
-  // ── Audio player ──────────────────────────────────────────────────────────
-  // WHY audioplayers: works on both Android AND Chrome web
-  final AudioPlayer _player = AudioPlayer();
 
   // ── Waveform animation ────────────────────────────────────────────────────
   late final AnimationController _waveCtrl;
@@ -57,7 +51,7 @@ class _NarratorScreenState extends State<NarratorScreen>
       duration: const Duration(seconds: 2),
     );
     _checkApiKey();
-    _setupAudioListeners();
+    _setupNarratorListeners();
   }
 
   Future<void> _checkApiKey() async {
@@ -65,35 +59,54 @@ class _NarratorScreenState extends State<NarratorScreen>
     if (mounted) setState(() => _hasApiKey = has);
   }
 
-  void _setupAudioListeners() {
-    // Update progress bar as audio plays
-    _player.onPositionChanged.listen((pos) {
-      if (mounted) setState(() {
-        _position = pos;
-        _progress = _total.inMilliseconds > 0
-            ? pos.inMilliseconds / _total.inMilliseconds
-            : 0;
-      });
-    });
-
-    _player.onDurationChanged.listen((dur) {
-      if (mounted) setState(() => _total = dur);
-    });
-
-    // When audio finishes
-    _player.onPlayerComplete.listen((_) {
+  void _setupNarratorListeners() {
+    NarratorService.instance.onSpeakStart = () {
       if (mounted) {
-        setState(() { _isPlaying = false; _progress = 0; });
+        setState(() {
+          _isPlaying = true;
+          _isLoading = false;
+        });
+        _waveCtrl.repeat();
+      }
+    };
+    NarratorService.instance.onSpeakComplete = () {
+      if (mounted) {
+        setState(() {
+          _isPlaying = false;
+          _progress = 0.0;
+        });
         _waveCtrl.stop();
         _waveCtrl.reset();
       }
-    });
+    };
+    NarratorService.instance.onSpeakError = (err) {
+      if (mounted) {
+        setState(() {
+          _errorMsg = err;
+          _isPlaying = false;
+          _isLoading = false;
+        });
+        _waveCtrl.stop();
+        _waveCtrl.reset();
+      }
+    };
+    NarratorService.instance.onProgress = (pct) {
+      if (mounted) {
+        setState(() {
+          _progress = pct;
+        });
+      }
+    };
   }
 
   @override
   void dispose() {
+    NarratorService.instance.onSpeakStart = null;
+    NarratorService.instance.onSpeakComplete = null;
+    NarratorService.instance.onSpeakError = null;
+    NarratorService.instance.onProgress = null;
+    NarratorService.instance.stop();
     _waveCtrl.dispose();
-    _player.dispose();
     super.dispose();
   }
 
@@ -133,23 +146,8 @@ class _NarratorScreenState extends State<NarratorScreen>
 
       setState(() => _narrationText = result.text);
 
-      // Step 2: Convert text to MP3 via Google TTS
-      final mp3Bytes = await NarratorService.instance
-          .synthesizeVoice(result.text!);
-
-      if (mp3Bytes == null || mp3Bytes.isEmpty) {
-        setState(() {
-          _errorMsg = 'TTS failed — text generated but audio unavailable';
-          _isLoading = false;
-        });
-        return;
-      }
-
-      // Step 3: Play the MP3
-      await _player.play(BytesSource(mp3Bytes));
-      _waveCtrl.repeat();
-      setState(() { _isPlaying = true; _isLoading = false; });
-
+      // Step 2: Play the text using TTS
+      await NarratorService.instance.speak(result.text!, style: _style);
     } catch (e) {
       setState(() {
         _errorMsg = 'Error: $e';
@@ -168,13 +166,11 @@ class _NarratorScreenState extends State<NarratorScreen>
     }
 
     if (_isPlaying) {
-      await _player.pause();
+      await NarratorService.instance.pause();
       _waveCtrl.stop();
       setState(() => _isPlaying = false);
     } else {
-      await _player.resume();
-      _waveCtrl.repeat();
-      setState(() => _isPlaying = true);
+      await NarratorService.instance.speak(_narrationText!, style: _style);
     }
   }
 
@@ -319,21 +315,15 @@ class _NarratorScreenState extends State<NarratorScreen>
                       ),
                       child: Slider(
                         value: _progress.clamp(0.0, 1.0),
-                        onChanged: (v) async {
-                          final pos = Duration(
-                            milliseconds:
-                                (v * _total.inMilliseconds).round(),
-                          );
-                          await _player.seek(pos);
-                        },
+                        onChanged: null,
                       ),
                     ),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(_formatDuration(_position),
+                        Text('${(_progress * 100).toStringAsFixed(0)}%',
                             style: AppTypography.caption),
-                        Text(_formatDuration(_total),
+                        const Text('100%',
                             style: AppTypography.caption),
                       ],
                     ),

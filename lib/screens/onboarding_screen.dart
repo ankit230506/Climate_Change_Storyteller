@@ -13,6 +13,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final _controller = PageController();
   int _page = 0;
 
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
   static const _pages = [
     _OnboardPage(
       icon: Icons.public,

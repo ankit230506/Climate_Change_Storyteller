@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io' show File;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import '../theme/app_theme.dart';
 import '../models/app_models.dart';
 import '../widgets/shared_widgets.dart';
@@ -7,27 +9,6 @@ import '../services/narrator_service.dart';
 import '../services/lg_ssh_service.dart';
 import '../services/kml_builder_service.dart';
 
-/// FEATURE: Story Mode Screen
-///
-/// PURPOSE:
-/// Guided auto-play narrative experience for museum/exhibition settings.
-/// The presenter presses Play — the app handles everything automatically:
-///   1. Fly LG camera to the chapter's region
-///   2. Send the era's KML to all LG screens
-///   3. Generate AI narration via Gemini
-///   4. Play the narration audio
-///   5. Wait for audio to finish → auto-advance to next chapter
-///
-/// CHAPTERS:
-///   1. The World Before      — 1900 — Arctic
-///   2. The Great Melt        — 2026 — Arctic
-///   3. Forests Falling       — 2026 — Amazon
-///   4. Rising Waters         — 2100 — Maldives
-///   5. A Choice Remains      — 2100 — Pacific
-///
-/// WHY AUTO-PLAY:
-/// In museum mode a guide doesn't want to tap through manually.
-/// The story flows like a documentary — region to region, era to era.
 
 class StoryModeScreen extends StatefulWidget {
   const StoryModeScreen({super.key});
@@ -190,10 +171,17 @@ class _StoryModeScreenState extends State<StoryModeScreen>
         return;
       }
 
-      // STEP 4: Synthesize and play voice
-      setState(() => _statusMsg = 'Playing narration…');
-      final mp3 = await NarratorService.instance
-          .synthesizeVoice(narration.text!);
+      // STEP 4: Use generated narration text
+      setState(() => _statusMsg = 'Narration ready');
+      final narrationText = narration.text ?? '';
+      if (narrationText.isEmpty) {
+        setState(() {
+          _statusMsg = '⚠️ No narration text generated';
+          _isLoading = false;
+        });
+        _startProgressTimer();
+        return;
+      }
 
       setState(() { _isLoading = false; });
 
@@ -223,7 +211,7 @@ class _StoryModeScreenState extends State<StoryModeScreen>
 
   void _goToChapter(int index) {
     if (index < 0 || index >= _chapters.length) return;
-    if (index > _completedUpTo + 1) return; // Can't skip ahead
+    if (index > _completedUpTo + 1 && index > _currentChapter + 1) return; // Can't skip more than one ahead
     _progressTimer?.cancel();
     setState(() {
       _currentChapter  = index;
@@ -295,9 +283,16 @@ class _StoryModeScreenState extends State<StoryModeScreen>
 
   Future<String> _readFile(String path) async {
     try {
-      // For web — return empty string (KML builder generates content)
-      return '';
+      return await rootBundle.loadString(path);
     } catch (_) {
+      try {
+        final file = File(path);
+        if (await file.exists()) {
+          return await file.readAsString();
+        }
+      } catch (e) {
+        debugPrint('Error reading KML file: $e');
+      }
       return '';
     }
   }

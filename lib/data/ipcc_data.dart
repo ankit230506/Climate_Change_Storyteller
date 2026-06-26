@@ -1,7 +1,3 @@
-/// IPCC AR6 scenario data bundled as Dart constants.
-/// Source: https://data.ece.iiasa.ac.at/ar6
-/// These are not live API calls — IPCC publishes static datasets.
-/// Values represent global means under SSP3-7.0 (middle-of-road scenario).
 library ipcc_data;
 
 // ── Temperature anomaly (°C relative to 1850-1900 baseline) ─────────────────
@@ -134,6 +130,17 @@ const List<IpccRegionData> kRegionIpccData = [
       1900: 'The Maldives in 1900 was a nation of 1,200 islands averaging just 1.5 metres above sea level, sustained by healthy coral reefs.',
       2026: 'Sea levels have risen 33 cm. Coral bleaching has affected 60% of reefs. The Maldives government has already purchased land in India as a contingency.',
       2100: 'With 90 cm of sea level rise under SSP3, 80% of the Maldives landmass will be uninhabitable by 2100. The nation is studying how to preserve cultural identity without a physical homeland.',
+    },
+  ),
+  IpccRegionData(
+    regionId: 'sahara',
+    name: 'Sahara',
+    localTempAnomaly: {1900: 0.5, 2026: 1.5, 2100: 3.5},
+    seaLevelMm: {1900: 0, 2026: 0, 2100: 0},
+    description: {
+      1900: 'The Sahara Desert in 1900 was already the world\'s largest hot desert, spanning 9.2 million km². Oasis communities and nomadic peoples had adapted to its extreme conditions over centuries, with summer temperatures regularly exceeding 50°C.',
+      2026: 'The Sahara has warmed 1.5°C above its pre-industrial baseline — faster than the global average. Desertification is accelerating at its southern margins in the Sahel, displacing millions. Dust storms have increased in frequency and intensity, affecting air quality across West Africa and even reaching the Americas.',
+      2100: 'Under current emissions trajectories, the Sahara is projected to warm by 3.5°C, pushing peak temperatures beyond 55°C regularly. The desert is expanding southward at an accelerating rate, threatening agricultural lands across the Sahel. Extreme heat events will make large areas uninhabitable without air conditioning for much of the year.',
     },
   ),
 ];

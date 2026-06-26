@@ -151,7 +151,7 @@ class KmlBuilderService {
     return {
       'temp_anomaly': '+${tempAnomaly.toStringAsFixed(1)}°C',
       'sea_level':    '${seaLevel.toStringAsFixed(0)} mm',
-      'ice_extent':   '${(iceExtent / 1e6).toStringAsFixed(1)} M km²',
+      'ice_extent':   '${iceExtent.toStringAsFixed(1)} M km²',
       'forest_loss':  '${forestLoss.toStringAsFixed(1)}%',
     };
   }

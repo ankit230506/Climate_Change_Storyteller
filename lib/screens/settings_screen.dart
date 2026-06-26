@@ -4,6 +4,7 @@ import '../theme/app_theme.dart';
 import '../models/app_models.dart';
 import '../widgets/shared_widgets.dart';
 import '../services/lg_ssh_service.dart';
+import 'region_detail_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -724,93 +725,4 @@ class _CornerPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_CornerPainter old) => false;
-}
-
-
-class ApiSetupScreen extends StatefulWidget {
-  const ApiSetupScreen({super.key});
-  @override
-  State<ApiSetupScreen> createState() => _ApiSetupScreenState();
-}
-
-class _ApiSetupScreenState extends State<ApiSetupScreen> {
-  final _geminiCtrl = TextEditingController();
-  bool _geminiSet = false;
-  bool _obscure = true;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.bg0,
-      appBar: AppBar(title: const Text('API Setup')),
-      body: SafeArea(child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(children: [
-          Container(width: 64, height: 64,
-            decoration: BoxDecoration(color: AppColors.bg2,
-              shape: BoxShape.circle,
-              border: Border.all(color: const Color(0xFF1E2235))),
-            child: const Icon(Icons.key_rounded,
-                color: AppColors.warning, size: 30)),
-          const SizedBox(height: 16),
-          Text('API Setup', style: AppTypography.heading2),
-          Text('Encrypted via flutter_secure_storage',
-              style: AppTypography.bodySmall),
-          const SizedBox(height: 28),
-
-          Align(alignment: Alignment.centerLeft,
-            child: Text('REQUIRED', style: AppTypography.label)),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: AppColors.bg2,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFF1E2235))),
-            child: Column(children: [
-              Row(children: [
-                const Icon(Icons.star, color: AppColors.primary, size: 20),
-                const SizedBox(width: 12),
-                Expanded(child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Gemini API Key', style: AppTypography.bodyLarge),
-                    Text('Google AI Studio', style: AppTypography.bodySmall),
-                  ])),
-                if (_geminiSet) StatusPill.active(),
-              ]),
-              const SizedBox(height: 10),
-              TextFormField(
-                controller: _geminiCtrl,
-                obscureText: _obscure,
-                onChanged: (v) => setState(() => _geminiSet = v.length > 8),
-                style: const TextStyle(fontFamily: 'monospace',
-                    fontSize: 13, color: AppColors.textPrimary,
-                    letterSpacing: 1.5),
-                decoration: InputDecoration(
-                  hintText: 'AIza••••••••••••',
-                  suffixIcon: IconButton(
-                    icon: Icon(_obscure ? Icons.visibility_off
-                        : Icons.visibility,
-                        color: AppColors.textMuted, size: 18),
-                    onPressed: () => setState(() => _obscure = !_obscure)),
-                ),
-              ),
-            ]),
-          ),
-          const SizedBox(height: 28),
-
-          ElevatedButton(
-            onPressed: _geminiSet ? () => Navigator.pop(context) : null,
-            child: const Text('Save & Continue'),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Skip Optional Keys'),
-          ),
-          const SizedBox(height: 32),
-        ]),
-      )),
-    );
-  }
-}
+}
