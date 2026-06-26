@@ -1,13 +1,8 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import '../data/ipcc_data.dart';
+import '/features/local data/ipcc_data.dart';
 
-/// Fetches live climate data from NOAA, NASA NSIDC, and NOAA Tides.
-/// Falls back to IPCC bundled constants if network fails.
-///
-/// WHY HERE: All external HTTP calls for climate numbers live in one place.
-/// KmlBuilderService calls this to get the stats it embeds in KML files.
-/// Timeline screen calls this to fill the stat cards.
+
 class ClimateDataService {
   ClimateDataService._();
   static final ClimateDataService instance = ClimateDataService._();

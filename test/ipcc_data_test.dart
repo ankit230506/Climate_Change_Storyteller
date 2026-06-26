@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:climate_storyteller/data/ipcc_data.dart';
+import 'package:climate_storyteller/features/local data/ipcc_data.dart';
 void main() {
   group('IPCC AR6 bundled data', () {
     test('temperature anomaly increases over time', () {

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import '../theme/app_theme.dart';
+import '/core/theme/app_theme.dart';
 import '../models/app_models.dart';
 import '../widgets/shared_widgets.dart';
 import '../services/lg_ssh_service.dart';
-import '../services/secure_storage_service.dart';
+import '/core/storage/secure_storage_service.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // REGION DETAIL SCREEN

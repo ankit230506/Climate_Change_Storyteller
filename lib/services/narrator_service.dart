@@ -2,10 +2,10 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
-import '../data/ipcc_data.dart';
-import '../models/app_models.dart';
-import '../services/secure_storage_service.dart';
-import '../services/climate_data_service.dart';
+import '/features/local data/ipcc_data.dart';
+import '/models/app_models.dart';
+import '/core/storage/secure_storage_service.dart';
+import '/services/climate_data_service.dart';
 
 class NarratorService {
   NarratorService._();

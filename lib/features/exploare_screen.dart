@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'dart:ui' as ui;
-import '../theme/app_theme.dart';
+import '/core/theme/app_theme.dart';
 import '../models/app_models.dart';
 import '../widgets/shared_widgets.dart';
 import '../services/lg_ssh_service.dart';

@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import '../theme/app_theme.dart';
-import 'exploare_screen.dart';
-import 'timeline_screen.dart';
-import 'narrator_screen.dart';
-import 'story_mode_screen.dart';
-import 'data_insight_screen.dart';
+import '/core/theme/app_theme.dart';
+import '/features/exploare_screen.dart';
+import '/screens/timeline_screen.dart';
+import '/features/narrator_screen.dart';
+import '/screens/story_mode_screen.dart';
+import '/features/data_insight_screen.dart';
 import 'settings_screen.dart';
 
 class ShellScreen extends StatefulWidget {

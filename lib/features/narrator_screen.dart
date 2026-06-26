@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'dart:math' as math;
-import '../theme/app_theme.dart';
+import '/core/theme/app_theme.dart';
 import '../models/app_models.dart';
 import '../widgets/shared_widgets.dart';
 import '../services/narrator_service.dart';
-import '../services/secure_storage_service.dart';
+import '/core/storage/secure_storage_service.dart';
 
 /// FEATURE: Narrator screen
 /// WHAT IT DOES:

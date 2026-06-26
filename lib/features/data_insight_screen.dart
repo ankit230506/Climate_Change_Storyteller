@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
-import '../theme/app_theme.dart';
-import '../data/ipcc_data.dart';
+import '/core/theme/app_theme.dart';
+import '/features/local data/ipcc_data.dart';
 
 class DataInsightsScreen extends StatefulWidget {
   const DataInsightsScreen({super.key});

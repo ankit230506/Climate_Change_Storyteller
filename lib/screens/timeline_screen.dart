@@ -1,23 +1,14 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import '../theme/app_theme.dart';
+import '/core/theme/app_theme.dart';
 import '../models/app_models.dart';
 import '../widgets/shared_widgets.dart';
 import '../services/lg_ssh_service.dart';
 import '../services/kml_builder_service.dart';
 import '../services/climate_data_service.dart';
 
-/// FEATURE: Timeline screen
-/// WHAT IT DOES:
-///   - Shows 1900 / 2026 / 2100 era slider
-///   - Calls ClimateDataService to fetch REAL stat cards:
-///       • Temperature anomaly from NOAA CDO
-///       • Sea level from NOAA Tides
-///       • Arctic ice extent from NASA NSIDC
-///   - For 1900 + 2100: uses IPCC bundled data (instant, no internet)
-///   - For 2026: hits live NOAA + NSIDC APIs
-///   - Builds KML via KmlBuilderService → sends to LG via SSH
+
 class TimelineScreen extends StatefulWidget {
   const TimelineScreen({super.key});
   @override

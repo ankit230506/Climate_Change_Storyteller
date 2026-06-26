@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io' show File;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
-import '../theme/app_theme.dart';
+import '/core/theme/app_theme.dart';
 import '../models/app_models.dart';
 import '../widgets/shared_widgets.dart';
 import '../services/narrator_service.dart';

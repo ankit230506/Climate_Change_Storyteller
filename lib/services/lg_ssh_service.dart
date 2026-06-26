@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:dartssh2/dartssh2.dart';
 import '../models/app_models.dart';
-import 'secure_storage_service.dart';
+import '/core/storage/secure_storage_service.dart';
 
 class LGSSHService {
   LGSSHService._();

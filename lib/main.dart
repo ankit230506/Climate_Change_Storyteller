@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'theme/app_theme.dart';
-import 'screens/shell_screen.dart';
-import 'screens/onboarding_screen.dart';
-import 'screens/region_detail_screen.dart';
-import 'utils/app_routes.dart';
-import 'models/app_models.dart';
+import '/core/theme/app_theme.dart';
+import '/screens/shell_screen.dart';
+import '/features/onboarding_screen.dart';
+import '/screens/region_detail_screen.dart';
+import '/utils/app_routes.dart';
+import '/models/app_models.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
