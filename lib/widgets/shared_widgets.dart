@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import '/core/theme/app_theme.dart';
-import '../models/app_models.dart';
+import 'package:climate_storyteller/core/theme/app_theme.dart';
+import 'package:climate_storyteller/features/explore/domain/entities/climate_era.dart';
+import 'package:climate_storyteller/features/lg_connection/domain/entities/lg_rig_state.dart';
 
 // ─────────────────────────────────────────────
 // Section Header
@@ -59,9 +60,9 @@ class StatusPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.15),
+        color: color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.4)),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
       ),
       child: Text(
         label,
@@ -105,7 +106,7 @@ class LGStatusCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isConnected
-                ? AppColors.primary.withOpacity(0.3)
+                ? AppColors.primary.withValues(alpha: 0.3)
                 : const Color(0xFF1E2235),
           ),
         ),
@@ -203,7 +204,7 @@ class _PulsingDotState extends State<_PulsingDot>
           shape: BoxShape.circle,
           color: widget.color,
           boxShadow: widget.active
-              ? [BoxShadow(color: widget.color.withOpacity(0.6), blurRadius: 6)]
+              ? [BoxShadow(color: widget.color.withValues(alpha: 0.6), blurRadius: 6)]
               : null,
         ),
       ),
@@ -236,7 +237,7 @@ class EraChip extends StatelessWidget {
         curve: Curves.easeOut,
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         decoration: BoxDecoration(
-          color: isSelected ? AppColors.primary.withOpacity(0.15) : AppColors.bg3,
+          color: isSelected ? AppColors.primary.withValues(alpha: 0.15) : AppColors.bg3,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color: isSelected ? AppColors.primary : const Color(0xFF252840),
@@ -290,7 +291,7 @@ class CategoryFilterBar extends StatelessWidget {
               duration: const Duration(milliseconds: 180),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
               decoration: BoxDecoration(
-                color: active ? AppColors.primary.withOpacity(0.15) : AppColors.bg3,
+                color: active ? AppColors.primary.withValues(alpha: 0.15) : AppColors.bg3,
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
                   color: active ? AppColors.primary : const Color(0xFF252840),
