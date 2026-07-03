@@ -17,7 +17,7 @@ abstract class NarratorRemoteDataSource {
 }
 
 class NarratorRemoteDataSourceImpl implements NarratorRemoteDataSource {
-  static const _geminiModel = 'gemini-2.5-flash';
+  static const _geminiModel = 'gemini-1.5-flash';
   static const _geminiBase  =
       'https://generativelanguage.googleapis.com/v1beta/models/$_geminiModel:generateContent';
 

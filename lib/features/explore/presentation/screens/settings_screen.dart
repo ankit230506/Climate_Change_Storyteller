@@ -180,13 +180,14 @@ class _LGConnectScreenState extends State<LGConnectScreen>
     final port = int.tryParse(_portCtrl.text.trim()) ?? 22;
     final user = _userCtrl.text.trim().isEmpty ? 'lg' : _userCtrl.text.trim();
     final pass = _passCtrl.text.isEmpty ? 'lg' : _passCtrl.text;
+    final screens = int.tryParse(_screenCtrl.text.trim()) ?? 5;
 
     if (ip.isEmpty) { _showError('Please enter an IP address'); return; }
 
     setState(() => _isConnecting = true);
     try {
       final ok = await DI.connectToLg(
-        ipAddress: ip, port: port, username: user, password: pass);
+        ipAddress: ip, port: port, username: user, password: pass, screenCount: screens);
       if (!mounted) return;
       if (ok) {
         final screens = DI.lgRepository.state.screenCount;
@@ -256,7 +257,7 @@ class _LGConnectScreenState extends State<LGConnectScreen>
       ),
       body: TabBarView(controller: _tabs, children: [
         _ManualTab(ipCtrl: _ipCtrl, portCtrl: _portCtrl,
-          userCtrl: _userCtrl, passCtrl: _passCtrl,
+          userCtrl: _userCtrl, passCtrl: _passCtrl, screenCtrl: _screenCtrl,
           obscurePass: _obscurePass, isConnecting: _isConnecting,
           onTogglePass: () => setState(() => _obscurePass = !_obscurePass),
           onConnect: _connect),
@@ -267,12 +268,12 @@ class _LGConnectScreenState extends State<LGConnectScreen>
 }
 
 class _ManualTab extends StatelessWidget {
-  final TextEditingController ipCtrl, portCtrl, userCtrl, passCtrl;
+  final TextEditingController ipCtrl, portCtrl, userCtrl, passCtrl, screenCtrl;
   final bool obscurePass, isConnecting;
   final VoidCallback onTogglePass, onConnect;
 
   const _ManualTab({required this.ipCtrl, required this.portCtrl,
-      required this.userCtrl, required this.passCtrl,
+      required this.userCtrl, required this.passCtrl, required this.screenCtrl,
       required this.obscurePass, required this.isConnecting,
       required this.onTogglePass, required this.onConnect});
 
@@ -298,6 +299,11 @@ class _ManualTab extends StatelessWidget {
             Expanded(child: TextField(controller: portCtrl,
               style: const TextStyle(color: AppColors.textPrimary),
               decoration: const InputDecoration(labelText: 'Port'))),
+            const SizedBox(width: 12),
+            Expanded(child: TextField(controller: screenCtrl,
+              style: const TextStyle(color: AppColors.textPrimary),
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Screens'))),
           ]),
           const SizedBox(height: 16),
           const SectionHeader(title: 'SSH Credentials'),

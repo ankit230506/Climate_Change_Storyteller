@@ -182,9 +182,10 @@ class KmlGeneratorDataSourceImpl implements KmlGeneratorDataSource {
     <LookAt>
       <longitude>${region.longitude}</longitude>
       <latitude>${region.latitude}</latitude>
-      <altitude>${region.altitude}</altitude>
-      <tilt>0</tilt>
+      <altitude>0</altitude>
       <heading>0</heading>
+      <tilt>0</tilt>
+      <range>${region.altitude}</range>
       <altitudeMode>relativeToGround</altitudeMode>
     </LookAt>
 

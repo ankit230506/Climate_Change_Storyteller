@@ -8,7 +8,8 @@ abstract class LgRepository {
     required String ipAddress,
     int port = 22,
     String username = 'lg',
-    String password = 'lq',
+    String password = 'lg',
+    int screenCount = 5,
   });
 
   Future<void> disconnect();

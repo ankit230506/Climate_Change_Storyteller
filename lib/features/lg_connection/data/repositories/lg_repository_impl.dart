@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:dartssh2/dartssh2.dart';
 import '../../domain/entities/lg_rig_state.dart';
 import '../../domain/repositories/lg_repository.dart';
@@ -22,14 +23,16 @@ class LgRepositoryImpl implements LgRepository {
   LGRigState get state => _state;
 
   static const _kmlDir    = '/var/www/html/kml';
-  static const _queryFile = '/var/www/html/query.txt';
+  static const _queryFile = '/tmp/query.txt';
+  static const _kmlSyncFile = '/var/www/html/kmls.txt';
 
   @override
   Future<bool> connect({
     required String ipAddress,
     int port = 22,
     String username = 'lg',
-    String password = 'lq',
+    String password = 'lg',
+    int screenCount = 5,
   }) async {
     _update(_state.copyWith(status: LGConnectionStatus.connecting));
 
@@ -42,10 +45,9 @@ class LgRepositoryImpl implements LgRepository {
       );
       _client = client;
 
-      // Verify kml folder exists
-      final check = await execute('test -d $_kmlDir && echo "yes" || echo "no"');
+      // Verify kml folder exists, create if not
+      await execute('mkdir -p $_kmlDir');
 
-      final screens = await _detectScreenCount();
       final sw = Stopwatch()..start();
       await execute('echo ping');
       final latency = sw.elapsedMilliseconds;
@@ -61,7 +63,7 @@ class LgRepositoryImpl implements LgRepository {
         status: LGConnectionStatus.connected,
         ipAddress: ipAddress,
         port: port,
-        screenCount: screens,
+        screenCount: screenCount,
         latencyMs: latency,
       ));
 
@@ -98,28 +100,33 @@ class LgRepositoryImpl implements LgRepository {
   Future<void> sendKml(String kmlFilename, {String? kmlContent}) async {
     if (_client == null) throw Exception('Not connected');
 
-    if (kmlContent != null) {
-      final escaped = kmlContent
-          .replaceAll('\\', '\\\\')
-          .replaceAll("'", "'\\''");
-
-      await execute("echo '$escaped' > $_kmlDir/$kmlFilename");
+    if (kmlContent != null && kmlContent.isNotEmpty) {
+      final b64 = base64Encode(utf8.encode(kmlContent));
+      await execute(
+        "echo '$b64' | base64 -d > $_kmlDir/$kmlFilename",
+      );
     }
 
-    final masterIp = _state.ipAddress!;
-    final netLink  = _buildNetworkLinkKml('http://$masterIp/kml/$kmlFilename');
-    final escaped  = netLink.replaceAll("'", "'\\''");
+    final kmlUrl = 'http://lg1:81/kml/$kmlFilename';
+    final netLinkKml = _buildNetworkLinkKml(kmlUrl);
+    final b64NetLink = base64Encode(utf8.encode(netLinkKml));
 
     for (int i = 2; i <= _state.screenCount; i++) {
       try {
         final cmd =
-            'sshpass -p lq ssh -o StrictHostKeyChecking=no '
-            'lg@lg$i "echo \'$escaped\' > $_kmlDir/kml_$i.kml" 2>&1';
+            'sshpass -p lg ssh -o StrictHostKeyChecking=no '
+            'lg@lg$i "echo \'$b64NetLink\' | base64 -d > $_kmlDir/kml_$i.kml && echo \'$b64NetLink\' | base64 -d > $_kmlDir/slave_$i.kml" 2>&1';
         await execute(cmd);
       } catch (_) {}
     }
 
-    await _triggerRefresh(kmlFilename);
+    await execute("echo '$b64NetLink' | base64 -d > $_kmlSyncFile");
+    await execute("echo '$b64NetLink' | base64 -d > $_kmlDir/kml_1.kml");
+    await execute("echo '$b64NetLink' | base64 -d > $_kmlDir/slave_1.kml");
+    await execute("echo '$b64NetLink' | base64 -d > $_kmlDir/master.kml");
+
+    await execute("echo '$kmlUrl' > $_queryFile");
+
     _update(_state.copyWith(currentKml: kmlFilename));
   }
 
@@ -132,18 +139,34 @@ class LgRepositoryImpl implements LgRepository {
     double heading = 0,
   }) async {
     if (_client == null) throw Exception('Not connected');
-    final flytoCmd = 'flytoview=$longitude,$latitude,$altitude,$heading,$tilt,0';
-    await execute("echo '$flytoCmd' > $_queryFile");
+
+    final lookAtKml =
+        'flytoview=<LookAt>'
+        '<longitude>$longitude</longitude>'
+        '<latitude>$latitude</latitude>'
+        '<altitude>0</altitude>'
+        '<heading>$heading</heading>'
+        '<tilt>$tilt</tilt>'
+        '<range>$altitude</range>'
+        '<altitudeMode>relativeToGround</altitudeMode>'
+        '</LookAt>';
+
+    await execute("echo '$lookAtKml' > $_queryFile");
   }
 
   @override
   Future<void> clearKml() async {
     if (_client == null) throw Exception('Not connected');
+
+    // Clear KML files and syndication on master
     await execute("rm -f $_kmlDir/*.kml 2>&1");
+    await execute("echo '' > $_kmlSyncFile 2>&1");
+
+    // Clear KML files on slave screens
     for (int i = 2; i <= _state.screenCount; i++) {
       try {
         await execute(
-          'sshpass -p lq ssh -o StrictHostKeyChecking=no '
+          'sshpass -p lg ssh -o StrictHostKeyChecking=no '
           'lg@lg$i "rm -f $_kmlDir/*.kml" 2>&1',
         );
       } catch (_) {}
@@ -157,35 +180,23 @@ class LgRepositoryImpl implements LgRepository {
     await execute('/home/lg/bin/lg-relaunch 2>&1 || DISPLAY=:0 /home/lg/earth/googleearth &');
   }
 
-  Future<int> _detectScreenCount() async {
-    try {
-      final result = await execute(
-        'for i in 2 3 4 5 6 7; do '
-        'sshpass -p lq ssh -o StrictHostKeyChecking=no '
-        '-o ConnectTimeout=2 lg@lg\$i "echo ok" 2>/dev/null '
-        '&& echo "ok\$i"; done',
-      );
-      final count = 'ok'.allMatches(result).length + 1;
-      return count.clamp(1, 7);
-    } catch (_) {
-      return 1;
-    }
-  }
-
+  /// Builds a NetworkLink KML that tells slave Google Earth instances to
+  /// fetch the main KML from the master's web server.
   String _buildNetworkLinkKml(String href) =>
       '<?xml version="1.0" encoding="UTF-8"?>'
       '<kml xmlns="http://www.opengis.net/kml/2.2">'
-      '<NetworkLink><name>Climate Storyteller</name>'
-      '<Link><href>$href</href>'
+      '<Document>'
+      '<name>Climate Storyteller</name>'
+      '<NetworkLink>'
+      '<name>Climate Storyteller Data</name>'
+      '<Link>'
+      '<href>$href</href>'
       '<refreshMode>onInterval</refreshMode>'
       '<refreshInterval>2</refreshInterval>'
-      '</Link></NetworkLink></kml>';
-
-  Future<void> _triggerRefresh(String kmlFilename) async {
-    try {
-      await execute("echo '$kmlFilename' > $_queryFile");
-    } catch (_) {}
-  }
+      '</Link>'
+      '</NetworkLink>'
+      '</Document>'
+      '</kml>';
 
   void _startKeepalive() {
     _keepaliveTimer?.cancel();
