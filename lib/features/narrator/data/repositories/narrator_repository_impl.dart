@@ -26,13 +26,18 @@ class NarratorRepositoryImpl implements NarratorRepository {
     ClimateStats? stats,
   }) async {
     final apiKey = await SecureStorageService.instance.getGeminiKey();
-    if (apiKey == null || apiKey.isEmpty) {
-      return const NarrationResult.error('No Gemini API key. Go to Settings → API Setup.');
-    }
-
     final regionData = getRegionData(region.id);
     final eraYear = int.parse(era.label);
     final seedText = regionData?.description[eraYear] ?? '';
+
+    if (apiKey == null || apiKey.isEmpty) {
+      return NarrationResult(
+        text: seedText,
+        region: region.name,
+        era: era.label,
+        style: style,
+      );
+    }
 
     final prompt = remoteDataSource.buildPrompt(
       region: region,
@@ -51,14 +56,19 @@ class NarratorRepositoryImpl implements NarratorRepository {
         style: style,
       );
     } catch (e) {
-      return NarrationResult.error('Gemini error: $e');
+      // Gracefully fallback to seedText when API call fails
+      return NarrationResult(
+        text: seedText,
+        region: region.name,
+        era: era.label,
+        style: style,
+      );
     }
   }
 
   @override
   Future<Uint8List?> synthesizeVoice(String text, {VoiceStyle style = VoiceStyle.natural}) async {
-    final apiKey = await SecureStorageService.instance.getGeminiKey();
-    if (apiKey == null || apiKey.isEmpty) return null;
+    final apiKey = await SecureStorageService.instance.getGeminiKey() ?? '';
     return await ttsDataSource.synthesizeVoice(text, apiKey, style: style);
   }
 }

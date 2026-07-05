@@ -9,6 +9,7 @@ import 'package:climate_storyteller/features/lg_connection/domain/entities/lg_ri
 import 'package:climate_storyteller/features/explore/domain/entities/climate_region.dart';
 import 'package:climate_storyteller/features/explore/domain/entities/climate_era.dart';
 import 'package:climate_storyteller/features/narrator/domain/entities/narration_result.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 class StoryModeScreen extends StatefulWidget {
   const StoryModeScreen({super.key});
@@ -82,6 +83,7 @@ class _StoryModeScreenState extends State<StoryModeScreen>
 
   Timer?  _progressTimer;
   int     _elapsedSeconds = 0;
+  final AudioPlayer _player = AudioPlayer();
 
   late final AnimationController _pulseCtrl;
 
@@ -98,10 +100,20 @@ class _StoryModeScreenState extends State<StoryModeScreen>
   void dispose() {
     _progressTimer?.cancel();
     _pulseCtrl.dispose();
+    _player.dispose();
     super.dispose();
   }
 
   Future<void> _play() async {
+    if (_elapsedSeconds > 0 && !_isPlaying) {
+      await _player.resume();
+      setState(() { _isPlaying = true; });
+      _pulseCtrl.repeat(reverse: true);
+      _startProgressTimer();
+      return;
+    }
+
+    await _player.stop();
     setState(() { _isPlaying = true; _isLoading = true; });
     _pulseCtrl.repeat(reverse: true);
 
@@ -154,7 +166,7 @@ class _StoryModeScreenState extends State<StoryModeScreen>
         return;
       }
 
-      setState(() => _statusMsg = 'Narration ready');
+      setState(() => _statusMsg = 'Synthesizing audio…');
       final narrationText = narration.text ?? '';
       if (narrationText.isEmpty) {
         setState(() {
@@ -163,6 +175,14 @@ class _StoryModeScreenState extends State<StoryModeScreen>
         });
         _startProgressTimer();
         return;
+      }
+
+      final mp3Bytes = await DI.synthesizeAudio(narrationText, style: VoiceStyle.poetic);
+      if (mp3Bytes != null && mp3Bytes.isNotEmpty) {
+        await _player.play(BytesSource(mp3Bytes));
+        setState(() => _statusMsg = 'Narration playing…');
+      } else {
+        setState(() => _statusMsg = 'Narration ready (audio failed)');
       }
 
       setState(() { _isLoading = false; });
@@ -181,6 +201,7 @@ class _StoryModeScreenState extends State<StoryModeScreen>
   void _pause() {
     _progressTimer?.cancel();
     _pulseCtrl.stop();
+    _player.pause();
     setState(() {
       _isPlaying = false;
       _statusMsg = 'Paused — tap Play to continue';
@@ -191,6 +212,7 @@ class _StoryModeScreenState extends State<StoryModeScreen>
     if (index < 0 || index >= _chapters.length) return;
     if (index > _completedUpTo + 1 && index > _currentChapter + 1) return;
     _progressTimer?.cancel();
+    _player.stop();
     setState(() {
       _currentChapter  = index;
       _chapterProgress = 0.0;

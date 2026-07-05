@@ -22,6 +22,10 @@ class TtsDataSourceImpl implements TtsDataSource {
       VoiceStyle.scientific => 1.1,
     };
 
+    if (apiKey.isEmpty) {
+      return await _fallbackSynthesize(text);
+    }
+
     try {
       final uri = Uri.parse('https://texttospeech.googleapis.com/v1/text:synthesize?key=$apiKey');
       final res = await http.post(
