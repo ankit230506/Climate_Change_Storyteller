@@ -1,44 +1,36 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:climate_storyteller/features/climate_data/data/repositories/climate_repository_impl.dart';
-import 'package:climate_storyteller/features/climate_data/data/datasources/climate_local_data_source.dart';
-import 'package:climate_storyteller/features/climate_data/data/datasources/climate_remote_data_source.dart';
-
-class FakeClimateRemoteDataSource extends ClimateRemoteDataSource {
-  @override
-  Future<double> fetchTempAnomaly({String? noaaApiKey}) async => 1.25;
-
-  @override
-  Future<double> fetchSeaLevel() async => 102.4;
-
-  @override
-  Future<double> fetchArcticIceExtent() async => 4.67;
-}
+import 'package:climate_storyteller/features/climate_data/climate_data_service.dart';
+import 'package:climate_storyteller/features/lg_connection/lg_service.dart';
 
 void main() {
-  group('ClimateRepositoryImpl Tests', () {
-    late ClimateRepositoryImpl repository;
-    late ClimateLocalDataSourceImpl localDataSource;
-    late FakeClimateRemoteDataSource remoteDataSource;
+  group('ClimateDataService Tests', () {
+    late ClimateDataService service;
+    late LgService lgService;
 
     setUp(() {
-      localDataSource = ClimateLocalDataSourceImpl();
-      remoteDataSource = FakeClimateRemoteDataSource();
-      repository = ClimateRepositoryImpl(
-        localDataSource: localDataSource,
-        remoteDataSource: remoteDataSource,
-      );
+      lgService = LgService();
+      service = ClimateDataService(lgService: lgService);
     });
 
-    test('should fetch live stats for 2026', () async {
-      final stats = await repository.getStatsForYear(2026);
-      expect(stats.tempAnomaly, 1.25);
-      expect(stats.source, contains('NOAA'));
-    });
-
-    test('should fallback to local data for historical year 1900', () async {
-      final stats = await repository.getStatsForYear(1900);
+    test('should fallback directly to historical baseline for year 1900', () async {
+      final stats = await service.getStatsForYear(1900);
+      expect(stats.year, 1900);
       expect(stats.tempAnomaly, 0.0);
-      expect(stats.source, contains('IPCC'));
+      expect(stats.source, contains('historical baseline'));
+    });
+
+    test('should fallback directly to projection for year 2100', () async {
+      final stats = await service.getStatsForYear(2100);
+      expect(stats.year, 2100);
+      expect(stats.tempAnomaly, 3.2);
+      expect(stats.source, contains('SSP3-7.0 projection'));
+    });
+
+    test('should fallback to interpolated local data when remote call fails', () async {
+      final stats = await service.getStatsForYear(2026);
+      expect(stats.year, 2026);
+      expect(stats.tempAnomaly, 1.3); // Interpolated temperature anomaly for 2026
+      expect(stats.source, contains('NOAA live data + IPCC AR6'));
     });
   });
 }

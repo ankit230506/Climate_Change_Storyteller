@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:climate_storyteller/core/theme/app_theme.dart';
-import 'package:climate_storyteller/features/explore/presentation/screens/shell_screen.dart';
-import 'package:climate_storyteller/features/explore/presentation/screens/onboarding_screen.dart';
-import 'package:climate_storyteller/features/explore/presentation/screens/region_detail_screen.dart';
-import 'package:climate_storyteller/core/routes/app_routes.dart';
-import 'package:climate_storyteller/features/explore/domain/entities/climate_region.dart';
+import 'package:climate_storyteller/core/constant/app_theme.dart';
+import 'package:climate_storyteller/features/explore/shell_screen.dart';
+import 'package:climate_storyteller/features/explore/onboarding_screen.dart';
+import 'package:climate_storyteller/features/explore/region_detail_screen.dart';
+import 'package:climate_storyteller/core/constant/app_routes.dart';
+import 'package:climate_storyteller/features/explore/climate_region.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

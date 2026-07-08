@@ -18,6 +18,7 @@ class SecureStorageService {
   static const _kLgPort    = 'lg_port';
   static const _kLgUser    = 'lg_username';
   static const _kLgPass    = 'lg_password';
+  static const _kLgScreen  =  'lg_screen';
 
   // ── Gemini API key (required) ────────────────────────────────────────────
   Future<void> saveGeminiKey(String key) =>
@@ -42,12 +43,14 @@ class SecureStorageService {
     required int port,
     required String username,
     required String password,
+    required String screen,
   }) async {
     await Future.wait([
       _storage.write(key: _kLgIp,   value: ip),
       _storage.write(key: _kLgPort, value: port.toString()),
       _storage.write(key: _kLgUser, value: username),
       _storage.write(key: _kLgPass, value: password),
+      _storage.write(key: _kLgScreen, value: screen), 
     ]);
   }
 
@@ -57,12 +60,14 @@ class SecureStorageService {
       _storage.read(key: _kLgPort),
       _storage.read(key: _kLgUser),
       _storage.read(key: _kLgPass),
+      _storage.read(key: _kLgScreen),
     ]);
     return {
       'ip':       results[0],
       'port':     results[1],
       'username': results[2],
       'password': results[3],
+      'screen':   results[4],
     };
   }
 

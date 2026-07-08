@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:climate_storyteller/core/theme/app_theme.dart';
-import 'package:climate_storyteller/features/explore/domain/entities/climate_era.dart';
-import 'package:climate_storyteller/features/lg_connection/domain/entities/lg_rig_state.dart';
+import 'package:climate_storyteller/core/constant/app_theme.dart';
+import 'package:climate_storyteller/features/explore/climate_era.dart';
+import 'package:climate_storyteller/features/lg_connection/lg_rig_state.dart';
 
 // ─────────────────────────────────────────────
 // Section Header
