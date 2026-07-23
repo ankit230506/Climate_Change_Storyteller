@@ -8,6 +8,8 @@ import 'package:climate_storyteller/features/climate_data/climate_stats.dart';
 import 'package:climate_storyteller/features/narrator/narration_result.dart';
 import 'package:climate_storyteller/core/storage/secure_storage_service.dart';
 import 'package:climate_storyteller/features/climate_data/ipcc_data.dart';
+import 'package:climate_storyteller/core/di/injection_container.dart';
+import 'package:climate_storyteller/core/localization/language_service.dart';
 
 class NarratorService {
   static const _geminiModel = 'gemini-1.5-flash';
@@ -63,11 +65,9 @@ class NarratorService {
 
   Future<Uint8List?> synthesizeVoice(String text, {VoiceStyle style = VoiceStyle.natural}) async {
     final apiKey = await SecureStorageService.instance.getGeminiKey() ?? '';
-    final voiceName = switch (style) {
-      VoiceStyle.natural    => 'en-US-Neural2-F',
-      VoiceStyle.poetic     => 'en-US-News-K',
-      VoiceStyle.scientific => 'en-US-Neural2-H',
-    };
+    final AppLanguage currentLang = DI.languageService.currentLanguage;
+    final voiceName = currentLang.cloudTtsVoices[style] ?? 'en-US-Neural2-F';
+    final localeCode = currentLang.localeCode;
 
     final speakingRate = switch (style) {
       VoiceStyle.natural    => 1.0,
@@ -86,7 +86,7 @@ class NarratorService {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'input': {'text': text},
-          'voice': {'languageCode': 'en-US', 'name': voiceName},
+          'voice': {'languageCode': localeCode, 'name': voiceName},
           'audioConfig': {
             'audioEncoding': 'MP3',
             'speakingRate': speakingRate,
@@ -173,6 +173,8 @@ class NarratorService {
           'Ice extent: ${stats.iceLabel}, Forest loss: ${stats.forestLabel}'
         : '';
 
+    final langName = DI.languageService.currentLanguage.name;
+
     return '''You are a climate narrator for a Liquid Galaxy museum display.
 
 Region: ${region.name}
@@ -187,18 +189,21 @@ Style instruction: $styleGuide
 
 Write exactly 3 short paragraphs (2-3 sentences each, ~150 words total).
 No bullet points, no headers, no markdown.
-Written for speaking aloud to museum visitors.''';
+Written for speaking aloud to museum visitors.
+
+IMPORTANT: The narration MUST be written entirely in $langName. Under no circumstances should you output in English unless the requested language is English.''';
   }
 
   Future<Uint8List?> _fallbackSynthesize(String text) async {
     final chunks = _splitIntoChunks(text, 150);
     final List<int> allBytes = [];
+    final langCode = DI.languageService.currentLanguage.code;
     for (final chunk in chunks) {
       if (chunk.trim().isEmpty) continue;
       try {
         final uri = Uri.parse(
           'https://translate.google.com/translate_tts'
-          '?ie=UTF-8&tl=en&client=tw-ob'
+          '?ie=UTF-8&tl=$langCode&client=tw-ob'
           '&q=${Uri.encodeComponent(chunk)}'
         );
         final res = await http.get(uri, headers: {

@@ -8,6 +8,7 @@ import 'package:climate_storyteller/widgets/shared_widgets.dart';
 import 'package:climate_storyteller/features/explore/climate_region.dart';
 import 'package:climate_storyteller/features/explore/climate_era.dart';
 import 'package:climate_storyteller/features/narrator/narration_result.dart';
+import 'package:climate_storyteller/core/localization/language_service.dart';
 
 class NarratorScreen extends StatefulWidget {
   const NarratorScreen({super.key});
@@ -183,352 +184,366 @@ class _NarratorScreenState extends State<NarratorScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.bg0,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 4),
+    return StreamBuilder<AppLanguage>(
+      stream: DI.languageService.languageStream,
+      initialData: DI.languageService.currentLanguage,
+      builder: (context, langSnap) {
+        return Scaffold(
+          backgroundColor: AppColors.bg0,
+          body: SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 4),
 
-              // ── Header ──────────────────────────────────────────────────
-              Text('AI Narrator', style: AppTypography.heading1),
-              Text('Gemini · Google TTS',
-                  style: AppTypography.bodySmall),
-              const SizedBox(height: 20),
-
-              // ── No API key warning ───────────────────────────────────────
-              if (!_hasApiKey)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 16),
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: AppColors.warning.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                        color: AppColors.warning.withValues(alpha: 0.4)),
+                  // ── Header ──────────────────────────────────────────────────
+                  Text(
+                    DI.languageService.translate('narrator_title'),
+                    style: AppTypography.heading1,
                   ),
-                  child: const Row(children: [
-                    Icon(Icons.warning_amber_rounded,
-                        color: AppColors.warning, size: 20),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'No Gemini key set. Go to Settings → API Setup.',
-                        style: TextStyle(
-                            fontSize: 13, color: AppColors.warning),
+                  Text(
+                    DI.languageService.translate('narrator_subtitle'),
+                    style: AppTypography.bodySmall,
+                  ),
+                  const SizedBox(height: 20),
+
+                  // ── No API key warning ───────────────────────────────────────
+                  if (!_hasApiKey)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 16),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: AppColors.warning.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                            color: AppColors.warning.withValues(alpha: 0.4)),
                       ),
-                    ),
-                  ]),
-                ),
-
-              // ── Playback card ────────────────────────────────────────────
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: AppColors.bg2,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: const Color(0xFF1E2235)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Now playing badge
-                    if (_isPlaying || _narrationText != null)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: AppColors.primary.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Container(width: 6, height: 6,
-                              decoration: const BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: AppColors.primary)),
-                          const SizedBox(width: 6),
-                          Text(_isPlaying ? 'NOW PLAYING' : 'READY',
-                              style: AppTypography.caption.copyWith(
-                                  color: AppColors.primary,
-                                  letterSpacing: 1.2)),
-                        ]),
-                      ),
-                    const SizedBox(height: 12),
-
-                    Text(
-                      '${_region.name} · ${_era.label}',
-                      style: AppTypography.heading3,
-                    ),
-                    Text(
-                      _styleLabel(_style),
-                      style: AppTypography.bodySmall,
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Waveform
-                    AnimatedBuilder(
-                      animation: _waveCtrl,
-                      builder: (_, __) => SizedBox(
-                        height: 48,
-                        child: CustomPaint(
-                          size: const Size(double.infinity, 48),
-                          painter: _WavePainter(
-                            progress: _waveCtrl.value,
-                            isPlaying: _isPlaying,
+                      child: Row(children: [
+                        const Icon(Icons.warning_amber_rounded,
+                            color: AppColors.warning, size: 20),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            DI.languageService.translate('txt_no_gemini_key'),
+                            style: const TextStyle(
+                                fontSize: 13, color: AppColors.warning),
                           ),
                         ),
-                      ),
+                      ]),
                     ),
-                    const SizedBox(height: 8),
 
-                    // Progress bar
-                    SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        thumbShape: const RoundSliderThumbShape(
-                            enabledThumbRadius: 6),
-                        overlayShape: const RoundSliderOverlayShape(
-                            overlayRadius: 14),
-                      ),
-                      child: Slider(
-                        value: _progress.clamp(0.0, 1.0),
-                        onChanged: (v) async {
-                          final pos = Duration(
-                            milliseconds:
-                                (v * _total.inMilliseconds).round(),
-                          );
-                          await _player.seek(pos);
-                        },
-                      ),
+                  // ── Playback card ────────────────────────────────────────────
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: AppColors.bg2,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: const Color(0xFF1E2235)),
                     ),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(_formatDuration(_position),
-                            style: AppTypography.caption),
-                        Text(_formatDuration(_total),
-                            style: AppTypography.caption),
+                        // Now playing badge
+                        if (_isPlaying || _narrationText != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: AppColors.primary.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              Container(width: 6, height: 6,
+                                  decoration: const BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: AppColors.primary)),
+                              const SizedBox(width: 6),
+                              Text(
+                                  _isPlaying
+                                      ? DI.languageService.translate('badge_now_playing')
+                                      : DI.languageService.translate('badge_ready'),
+                                  style: AppTypography.caption.copyWith(
+                                      color: AppColors.primary,
+                                      letterSpacing: 1.2)),
+                            ]),
+                          ),
+                        const SizedBox(height: 12),
+
+                        Text(
+                          '${_region.name} · ${_era.label}',
+                          style: AppTypography.heading3,
+                        ),
+                        Text(
+                          _styleLabel(_style),
+                          style: AppTypography.bodySmall,
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Waveform
+                        AnimatedBuilder(
+                          animation: _waveCtrl,
+                          builder: (_, __) => SizedBox(
+                            height: 48,
+                            child: CustomPaint(
+                              size: const Size(double.infinity, 48),
+                              painter: _WavePainter(
+                                progress: _waveCtrl.value,
+                                isPlaying: _isPlaying,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+
+                        // Progress bar
+                        SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            thumbShape: const RoundSliderThumbShape(
+                                enabledThumbRadius: 6),
+                            overlayShape: const RoundSliderOverlayShape(
+                                overlayRadius: 14),
+                          ),
+                          child: Slider(
+                            value: _progress.clamp(0.0, 1.0),
+                            onChanged: (v) async {
+                              final pos = Duration(
+                                milliseconds:
+                                    (v * _total.inMilliseconds).round(),
+                              );
+                              await _player.seek(pos);
+                            },
+                          ),
+                        ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(_formatDuration(_position),
+                                style: AppTypography.caption),
+                            Text(_formatDuration(_total),
+                                style: AppTypography.caption),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Play / Pause button
+                        Center(
+                          child: GestureDetector(
+                            onTap: _togglePlayPause,
+                            child: Container(
+                              width: 64, height: 64,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: _isLoading
+                                    ? AppColors.bg3 : AppColors.primary,
+                                boxShadow: _isLoading ? null : [
+                                  BoxShadow(
+                                    color: AppColors.primary.withValues(alpha: 0.4),
+                                    blurRadius: 20,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              child: _isLoading
+                                  ? const Padding(
+                                      padding: EdgeInsets.all(18),
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2.5,
+                                          color: AppColors.primary))
+                                  : Icon(
+                                      _isPlaying
+                                          ? Icons.pause_rounded
+                                          : Icons.play_arrow_rounded,
+                                      size: 32,
+                                      color: AppColors.bg0,
+                                    ),
+                            ),
+                          ),
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 16),
+                  ),
+                  const SizedBox(height: 16),
 
-                    // Play / Pause button
-                    Center(
-                      child: GestureDetector(
-                        onTap: _togglePlayPause,
-                        child: Container(
-                          width: 64, height: 64,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: _isLoading
-                                ? AppColors.bg3 : AppColors.primary,
-                            boxShadow: _isLoading ? null : [
-                              BoxShadow(
-                                color: AppColors.primary.withValues(alpha: 0.4),
-                                blurRadius: 20,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                          child: _isLoading
-                              ? const Padding(
-                                  padding: EdgeInsets.all(18),
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2.5,
-                                      color: AppColors.primary))
-                              : Icon(
-                                  _isPlaying
-                                      ? Icons.pause_rounded
-                                      : Icons.play_arrow_rounded,
-                                  size: 32,
-                                  color: AppColors.bg0,
-                                ),
+                  // ── Error message ────────────────────────────────────────────
+                  if (_errorMsg != null)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.critical.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: AppColors.critical.withValues(alpha: 0.3)),
+                      ),
+                      child: Row(children: [
+                        const Icon(Icons.error_outline,
+                            color: AppColors.critical, size: 16),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(_errorMsg!,
+                            style: const TextStyle(
+                                fontSize: 12, color: AppColors.critical))),
+                      ]),
+                    ),
+
+                  // ── Generated text preview ───────────────────────────────────
+                  if (_narrationText != null) ...[
+                    const SizedBox(height: 16),
+                    SectionHeader(title: DI.languageService.translate('sec_generated_narration')),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: AppColors.bg2,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF1E2235)),
+                      ),
+                      child: Text(
+                        _narrationText!,
+                        style: AppTypography.bodySmall.copyWith(
+                          height: 1.7,
+                          color: AppColors.textSecondary,
                         ),
                       ),
                     ),
                   ],
-                ),
-              ),
-              const SizedBox(height: 16),
+                  const SizedBox(height: 24),
 
-              // ── Error message ────────────────────────────────────────────
-              if (_errorMsg != null)
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppColors.critical.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                        color: AppColors.critical.withValues(alpha: 0.3)),
-                  ),
-                  child: Row(children: [
-                    const Icon(Icons.error_outline,
-                        color: AppColors.critical, size: 16),
-                    const SizedBox(width: 8),
-                    Expanded(child: Text(_errorMsg!,
-                        style: const TextStyle(
-                            fontSize: 12, color: AppColors.critical))),
-                  ]),
-                ),
-
-              // ── Generated text preview ───────────────────────────────────
-              if (_narrationText != null) ...[
-                const SizedBox(height: 16),
-                const SectionHeader(title: 'Generated Narration'),
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: AppColors.bg2,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFF1E2235)),
-                  ),
-                  child: Text(
-                    _narrationText!,
-                    style: AppTypography.bodySmall.copyWith(
-                      height: 1.7,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 24),
-
-              // ── Region selector ──────────────────────────────────────────
-              const SectionHeader(title: 'Region'),
-              SizedBox(
-                height: 40,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: kDefaultRegions.map((r) {
-                    final active = r.id == _region.id;
-                    return GestureDetector(
-                      onTap: () => setState(() {
-                        _region = r;
-                        _narrationText = null;
-                        _errorMsg = null;
-                      }),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 180),
-                        margin: const EdgeInsets.only(right: 8),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: active
-                              ? AppColors.primary.withValues(alpha: 0.15)
-                              : AppColors.bg3,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: active
-                                ? AppColors.primary
-                                : const Color(0xFF252840),
-                          ),
-                        ),
-                        child: Text(r.name.split(' ').first,
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: active
-                                ? FontWeight.w700 : FontWeight.w400,
-                            color: active
-                                ? AppColors.primary
-                                : AppColors.textSecondary,
-                          )),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              // ── Era selector ─────────────────────────────────────────────
-              const SectionHeader(title: 'Era'),
-              Row(
-                children: ClimateEra.values.map((e) => Expanded(
-                  child: Padding(
-                    padding: EdgeInsets.only(
-                        right: e != ClimateEra.values.last ? 8 : 0),
-                    child: EraChip(
-                      era: e,
-                      isSelected: e == _era,
-                      onTap: () => setState(() {
-                        _era = e;
-                        _narrationText = null;
-                        _errorMsg = null;
-                      }),
-                    ),
-                  ),
-                )).toList(),
-              ),
-              const SizedBox(height: 20),
-
-              // ── Voice style selector ─────────────────────────────────────
-              const SectionHeader(title: 'Voice Style'),
-              Row(
-                children: VoiceStyle.values.map((s) {
-                  final active = s == _style;
-                  return Expanded(
-                    child: Padding(
-                      padding: EdgeInsets.only(
-                          right: s != VoiceStyle.values.last ? 8 : 0),
-                      child: GestureDetector(
-                        onTap: () => setState(() {
-                          _style = s;
-                          _narrationText = null;
-                          _errorMsg = null;
-                        }),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 180),
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          decoration: BoxDecoration(
-                            color: active
-                                ? AppColors.primary.withValues(alpha: 0.15)
-                                : AppColors.bg3,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
+                  // ── Region selector ──────────────────────────────────────────
+                  SectionHeader(title: DI.languageService.translate('sec_region')),
+                  SizedBox(
+                    height: 40,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: kDefaultRegions.map((r) {
+                        final active = r.id == _region.id;
+                        return GestureDetector(
+                          onTap: () => setState(() {
+                            _region = r;
+                            _narrationText = null;
+                            _errorMsg = null;
+                          }),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
+                            margin: const EdgeInsets.only(right: 8),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 8),
+                            decoration: BoxDecoration(
                               color: active
-                                  ? AppColors.primary
-                                  : const Color(0xFF252840),
+                                  ? AppColors.primary.withValues(alpha: 0.15)
+                                  : AppColors.bg3,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: active
+                                    ? AppColors.primary
+                                    : const Color(0xFF252840),
+                              ),
                             ),
+                            child: Text(r.name.split(' ').first,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: active
+                                    ? FontWeight.w700 : FontWeight.w400,
+                                color: active
+                                    ? AppColors.primary
+                                    : AppColors.textSecondary,
+                              )),
                           ),
-                          child: Text(
-                            _styleName(s),
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: active
-                                  ? FontWeight.w700 : FontWeight.w400,
-                              color: active
-                                  ? AppColors.primary
-                                  : AppColors.textSecondary,
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // ── Era selector ─────────────────────────────────────────────
+                  SectionHeader(title: DI.languageService.translate('sec_era')),
+                  Row(
+                    children: ClimateEra.values.map((e) => Expanded(
+                      child: Padding(
+                        padding: EdgeInsets.only(
+                            right: e != ClimateEra.values.last ? 8 : 0),
+                        child: EraChip(
+                          era: e,
+                          isSelected: e == _era,
+                          onTap: () => setState(() {
+                            _era = e;
+                            _narrationText = null;
+                            _errorMsg = null;
+                          }),
+                        ),
+                      ),
+                    )).toList(),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // ── Voice style selector ─────────────────────────────────────
+                  SectionHeader(title: DI.languageService.translate('sec_voice_style')),
+                  Row(
+                    children: VoiceStyle.values.map((s) {
+                      final active = s == _style;
+                      return Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.only(
+                              right: s != VoiceStyle.values.last ? 8 : 0),
+                          child: GestureDetector(
+                            onTap: () => setState(() {
+                              _style = s;
+                              _narrationText = null;
+                              _errorMsg = null;
+                            }),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                color: active
+                                    ? AppColors.primary.withValues(alpha: 0.15)
+                                    : AppColors.bg3,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: active
+                                      ? AppColors.primary
+                                      : const Color(0xFF252840),
+                                ),
+                              ),
+                              child: Text(
+                                _styleName(s),
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: active
+                                      ? FontWeight.w700 : FontWeight.w400,
+                                  color: active
+                                      ? AppColors.primary
+                                      : AppColors.textSecondary,
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 28),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 28),
 
-              // ── Generate button ──────────────────────────────────────────
-              ElevatedButton.icon(
-                onPressed: _isLoading ? null : _generateAndPlay,
-                icon: _isLoading
-                    ? const SizedBox(width: 18, height: 18,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: AppColors.bg0))
-                    : const Icon(Icons.auto_awesome,
-                        size: 18, color: AppColors.bg0),
-                label: Text(_isLoading
-                    ? 'Generating narration…'
-                    : 'Generate & Play Narration'),
+                  // ── Generate button ──────────────────────────────────────────
+                  ElevatedButton.icon(
+                    onPressed: _isLoading ? null : _generateAndPlay,
+                    icon: _isLoading
+                        ? const SizedBox(width: 18, height: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: AppColors.bg0))
+                        : const Icon(Icons.auto_awesome,
+                            size: 18, color: AppColors.bg0),
+                    label: Text(_isLoading
+                        ? DI.languageService.translate('btn_generating')
+                        : DI.languageService.translate('btn_generate_play')),
+                  ),
+                  const SizedBox(height: 32),
+                ],
               ),
-              const SizedBox(height: 32),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 

@@ -7,6 +7,8 @@ import 'package:climate_storyteller/features/climate_data/data_insight_screen.da
 import 'package:climate_storyteller/features/explore/story_mode_screen.dart';
 import 'package:climate_storyteller/features/climate_data/forest_watch_screen.dart';
 import 'package:climate_storyteller/features/explore/settings_screen.dart';
+import 'package:climate_storyteller/core/di/injection_container.dart';
+import 'package:climate_storyteller/core/localization/language_service.dart';
 
 class ShellScreen extends StatefulWidget {
   const ShellScreen({super.key});
@@ -51,57 +53,63 @@ class _BottomNav extends StatelessWidget {
         color: AppColors.bg1,
         border: Border(top: BorderSide(color: Color(0xFF1A1E2E), width: 1)),
       ),
-      child: SafeArea(
-        top: false,
-        child: BottomNavigationBar(
-          currentIndex: currentIndex,
-          onTap: onTap,
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          type: BottomNavigationBarType.fixed,
-          selectedItemColor: AppColors.primary,
-          unselectedItemColor: AppColors.textMuted,
-          selectedLabelStyle: const TextStyle(
-              fontSize: 9, fontWeight: FontWeight.w600),
-          unselectedLabelStyle: const TextStyle(fontSize: 9),
-          items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.explore_outlined),
-              activeIcon: Icon(Icons.explore),
-              label: 'Explore',
+      child: StreamBuilder<AppLanguage>(
+        stream: DI.languageService.languageStream,
+        initialData: DI.languageService.currentLanguage,
+        builder: (context, langSnap) {
+          return SafeArea(
+            top: false,
+            child: BottomNavigationBar(
+              currentIndex: currentIndex,
+              onTap: onTap,
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              type: BottomNavigationBarType.fixed,
+              selectedItemColor: AppColors.primary,
+              unselectedItemColor: AppColors.textMuted,
+              selectedLabelStyle: const TextStyle(
+                  fontSize: 9, fontWeight: FontWeight.w600),
+              unselectedLabelStyle: const TextStyle(fontSize: 9),
+              items: [
+                BottomNavigationBarItem(
+                  icon: const Icon(Icons.explore_outlined),
+                  activeIcon: const Icon(Icons.explore),
+                  label: DI.languageService.translate('nav_explore'),
+                ),
+                BottomNavigationBarItem(
+                  icon: const Icon(Icons.calendar_month_outlined),
+                  activeIcon: const Icon(Icons.calendar_month),
+                  label: DI.languageService.translate('nav_timeline'),
+                ),
+                BottomNavigationBarItem(
+                  icon: const Icon(Icons.record_voice_over_outlined),
+                  activeIcon: const Icon(Icons.record_voice_over),
+                  label: DI.languageService.translate('nav_narrator'),
+                ),
+                BottomNavigationBarItem(
+                  icon: const Icon(Icons.bar_chart_outlined),
+                  activeIcon: const Icon(Icons.bar_chart),
+                  label: DI.languageService.translate('nav_insights'),
+                ),
+                BottomNavigationBarItem(
+                  icon: const Icon(Icons.auto_stories_outlined),
+                  activeIcon: const Icon(Icons.auto_stories),
+                  label: DI.languageService.translate('nav_story'),
+                ),
+                BottomNavigationBarItem(
+                  icon: const Icon(Icons.forest_outlined),
+                  activeIcon: const Icon(Icons.forest),
+                  label: DI.languageService.translate('nav_forest'),
+                ),
+                BottomNavigationBarItem(
+                  icon: const Icon(Icons.settings_outlined),
+                  activeIcon: const Icon(Icons.settings),
+                  label: DI.languageService.translate('nav_settings'),
+                ),
+              ],
             ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.calendar_month_outlined),
-              activeIcon: Icon(Icons.calendar_month),
-              label: 'Timeline',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.record_voice_over_outlined),
-              activeIcon: Icon(Icons.record_voice_over),
-              label: 'Narrator',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.bar_chart_outlined),
-              activeIcon: Icon(Icons.bar_chart),
-              label: 'Insights',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.auto_stories_outlined),
-              activeIcon: Icon(Icons.auto_stories),
-              label: 'Story',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.forest_outlined),
-              activeIcon: Icon(Icons.forest),
-              label: 'Forest',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.settings_outlined),
-              activeIcon: Icon(Icons.settings),
-              label: 'Settings',
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }

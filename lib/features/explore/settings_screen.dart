@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:climate_storyteller/core/constant/app_theme.dart';
 import 'package:climate_storyteller/core/di/injection_container.dart';
@@ -6,92 +7,220 @@ import 'package:climate_storyteller/widgets/shared_widgets.dart';
 import 'package:climate_storyteller/features/lg_connection/lg_rig_state.dart';
 import 'package:climate_storyteller/features/explore/kml_cache_screen.dart';
 import 'package:climate_storyteller/features/explore/api_setup_screen.dart';
+import 'package:climate_storyteller/core/storage/secure_storage_service.dart';
+import 'package:climate_storyteller/core/localization/language_service.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.bg0,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
+  void _runDiagnostics(BuildContext context) {
+    if (!DI.lgService.state.isConnected) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Not connected to LG Rig — connect first'),
+        backgroundColor: AppColors.critical,
+      ));
+      return;
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(20),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 16),
+                Text('Running Diagnostics...', style: TextStyle(color: AppColors.textPrimary)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    DI.lgService.runDiagnostics().then((result) {
+      if (!context.mounted) return;
+      Navigator.pop(context); // Dismiss loading dialog
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: AppColors.bg1,
+          title: const Text('LG Rig Diagnostic Report'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                result,
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: result));
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('Copied report to clipboard!'),
+                  backgroundColor: AppColors.primary,
+                ));
+              },
+              child: const Text('Copy Report'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    }).catchError((e) {
+      if (!context.mounted) return;
+      Navigator.pop(context); // Dismiss loading dialog
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Diagnostics Failed'),
+          content: Text(e.toString()),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    });
+  }
+
+  void _setupNetworkLink(BuildContext context) {
+    if (!DI.lgService.state.isConnected) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Not connected to LG Rig — connect first'),
+        backgroundColor: AppColors.critical,
+      ));
+      return;
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(20),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 16),
+                Text('Configuring NetworkLink...', style: TextStyle(color: AppColors.textPrimary)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    DI.lgService.setupNetworkLink().then((_) {
+      if (!context.mounted) return;
+      Navigator.pop(context); // Dismiss loading dialog
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('NetworkLink configured and Google Earth relaunched!'),
+        backgroundColor: AppColors.good,
+      ));
+    }).catchError((e) {
+      if (!context.mounted) return;
+      Navigator.pop(context); // Dismiss loading dialog
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: AppColors.bg1,
+          title: const Text('Setup Failed'),
+          content: Text(e.toString(), style: const TextStyle(color: AppColors.textPrimary)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    });
+  }
+
+  void _openConnect(BuildContext context) {
+    Navigator.push(context,
+        MaterialPageRoute(builder: (_) => const LGConnectScreen()));
+  }
+
+  void _showLanguageSelector(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: AppColors.bg1,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          border: Border(top: BorderSide(color: Color(0xFF1E2235), width: 1.5)),
+        ),
+        child: SafeArea(
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              const SizedBox(height: 20),
-              Text('Settings', style: AppTypography.heading1),
-              const SizedBox(height: 24),
-
-              // LG connection
-              StreamBuilder<LGRigState>(
-                stream: DI.lgService.stateStream,
-                initialData: DI.lgService.state,
-                builder: (context, snap) {
-                  final rig = snap.data!;
-                  return Column(children: [
-                    LGStatusCard(rigState: rig,
-                        onTap: () => _openConnect(context)),
-                    const SizedBox(height: 8),
-                    if (rig.isConnected)
-                      OutlinedButton.icon(
-                        onPressed: () async {
-                          await DI.lgService.disconnect();
-                        },
-                        icon: const Icon(Icons.link_off,
-                            size: 18, color: AppColors.critical),
-                        label: const Text('Disconnect'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.critical,
-                          side: const BorderSide(
-                              color: AppColors.critical, width: 1),
+              const SizedBox(height: 12),
+              // Drag handle
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.textMuted.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                DI.languageService.translate('tile_language'),
+                style: AppTypography.heading2,
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: LanguageService.supportedLanguages.map((lang) {
+                    final isSelected = DI.languageService.currentLanguage.code == lang.code;
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+                      title: Text(
+                        lang.nativeName,
+                        style: TextStyle(
+                          color: isSelected ? AppColors.primary : AppColors.textPrimary,
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                         ),
-                      )
-                    else
-                      ElevatedButton.icon(
-                        onPressed: () => _openConnect(context),
-                        icon: const Icon(Icons.cable,
-                            size: 18, color: AppColors.bg0),
-                        label: const Text('Connect to LG Rig'),
                       ),
-                  ]);
-                },
+                      subtitle: Text(
+                        lang.name,
+                        style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                      ),
+                      trailing: isSelected
+                          ? const Icon(Icons.check_circle, color: AppColors.primary)
+                          : null,
+                      onTap: () {
+                        DI.languageService.setLanguage(lang.code);
+                        Navigator.pop(context);
+                      },
+                    );
+                  }).toList(),
+                ),
               ),
-              const SizedBox(height: 28),
-
-              const SectionHeader(title: 'Application'),
-              _Tile(icon: Icons.language, title: 'Language',
-                  subtitle: 'English', onTap: () {}),
-              _Tile(icon: Icons.storage_outlined, title: 'Data Sources',
-                  subtitle: 'NASA GIBS, NOAA, IPCC AR6, OpenAQ',
-                  onTap: () {}),
-
-              // KML Cache
-              _Tile(
-                icon: Icons.folder_outlined,
-                title: 'KML Cache',
-                subtitle: 'Download offline KML files for demo day',
-                onTap: () => Navigator.push(context,
-                    MaterialPageRoute(
-                        builder: (_) => const KmlCacheScreen())),
-              ),
-              const SizedBox(height: 20),
-
-              const SectionHeader(title: 'API Keys'),
-              _Tile(icon: Icons.vpn_key_outlined, title: 'API Setup',
-                  subtitle: 'Gemini API key, Flutter TTS',
-                  onTap: () => Navigator.push(context,
-                      MaterialPageRoute(
-                          builder: (_) => const ApiSetupScreen()))),
-              const SizedBox(height: 20),
-
-              const SectionHeader(title: 'About'),
-              _Tile(icon: Icons.info_outline,
-                  title: 'Climate Change Storyteller',
-                  subtitle: 'GSoC 2026 · Liquid Galaxy Project · v1.0.0',
-                  onTap: () {}),
-              const SizedBox(height: 32),
+              const SizedBox(height: 16),
             ],
           ),
         ),
@@ -99,9 +228,281 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
-  void _openConnect(BuildContext context) {
-    Navigator.push(context,
-        MaterialPageRoute(builder: (_) => const LGConnectScreen()));
+  void _showAboutDialog(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: AppColors.bg1,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          border: Border(top: BorderSide(color: Color(0xFF1E2235), width: 1.5)),
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.textMuted.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.primary.withValues(alpha: 0.08),
+                        blurRadius: 20,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.public,
+                    size: 38,
+                    color: AppColors.primary,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Climate Change Storyteller',
+                  style: AppTypography.heading2.copyWith(fontSize: 22),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  DI.languageService.translate('tile_about_sub'),
+                  style: AppTypography.bodySmall.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 20),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.bg2,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFF1E2235)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        DI.languageService.translate('sec_about').toUpperCase(),
+                        style: AppTypography.label.copyWith(
+                          fontSize: 10,
+                          color: AppColors.textMuted,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        DI.languageService.translate('about_description'),
+                        style: AppTypography.bodySmall.copyWith(
+                          color: AppColors.textSecondary,
+                          height: 1.5,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      const Divider(color: Color(0xFF1E2235), height: 1),
+                      const SizedBox(height: 16),
+                      _buildDetailRow(
+                        DI.languageService.translate('about_org'),
+                        'Liquid Galaxy Project',
+                      ),
+                      const SizedBox(height: 10),
+                      _buildDetailRow(
+                        DI.languageService.translate('about_prog'),
+                        'Google Summer of Code 2026',
+                      ),
+                      const SizedBox(height: 10),
+                      _buildDetailRow(
+                        DI.languageService.translate('about_sys'),
+                        'Liquid Galaxy (5-Screen Rig)',
+                      ),
+                      const SizedBox(height: 10),
+                      _buildDetailRow(
+                        DI.languageService.translate('about_tech'),
+                        'Flutter, Gemini AI, SSH Client',
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text(DI.languageService.translate('btn_close')),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: AppTypography.bodySmall.copyWith(
+            fontWeight: FontWeight.w600,
+            color: AppColors.textSecondary,
+          ),
+        ),
+        const Spacer(),
+        Text(
+          value,
+          style: AppTypography.bodySmall.copyWith(
+            color: AppColors.textPrimary,
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<AppLanguage>(
+      stream: DI.languageService.languageStream,
+      initialData: DI.languageService.currentLanguage,
+      builder: (context, langSnap) {
+        final currentLang = langSnap.data!;
+        return Scaffold(
+          backgroundColor: AppColors.bg0,
+          body: SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 20),
+                  Text(
+                    DI.languageService.translate('settings_title'),
+                    style: AppTypography.heading1,
+                  ),
+                  const SizedBox(height: 24),
+
+                  // LG connection
+                  StreamBuilder<LGRigState>(
+                    stream: DI.lgService.stateStream,
+                    initialData: DI.lgService.state,
+                    builder: (context, snap) {
+                      final rig = snap.data!;
+                      return Column(children: [
+                        LGStatusCard(rigState: rig,
+                            onTap: () => _openConnect(context)),
+                        const SizedBox(height: 8),
+                        if (rig.isConnected)
+                          OutlinedButton.icon(
+                            onPressed: () async {
+                              await DI.lgService.disconnect();
+                            },
+                            icon: const Icon(Icons.link_off,
+                                size: 18, color: AppColors.critical),
+                            label: Text(DI.languageService.translate('btn_disconnect')),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.critical,
+                              side: const BorderSide(
+                                  color: AppColors.critical, width: 1),
+                            ),
+                          )
+                        else
+                          ElevatedButton.icon(
+                            onPressed: () => _openConnect(context),
+                            icon: const Icon(Icons.cable,
+                                size: 18, color: AppColors.bg0),
+                            label: Text(DI.languageService.translate('btn_connect_lg')),
+                          ),
+                      ]);
+                    },
+                  ),
+                  const SizedBox(height: 28),
+
+                  SectionHeader(title: DI.languageService.translate('sec_application')),
+                  _Tile(
+                    icon: Icons.language,
+                    title: DI.languageService.translate('tile_language'),
+                    subtitle: currentLang.nativeName,
+                    onTap: () => _showLanguageSelector(context),
+                  ),
+                  _Tile(
+                    icon: Icons.storage_outlined,
+                    title: DI.languageService.translate('tile_data_sources'),
+                    subtitle: 'NASA GIBS, NOAA, IPCC AR6, OpenAQ',
+                    onTap: () {},
+                  ),
+
+                  // KML Cache
+                  _Tile(
+                    icon: Icons.folder_outlined,
+                    title: DI.languageService.translate('tile_kml_cache'),
+                    subtitle: DI.languageService.translate('tile_kml_cache_sub'),
+                    onTap: () => Navigator.push(context,
+                        MaterialPageRoute(
+                            builder: (_) => const KmlCacheScreen())),
+                  ),
+                  // Diagnostics
+                  _Tile(
+                    icon: Icons.build_circle_outlined,
+                    title: DI.languageService.translate('tile_lg_diagnostics'),
+                    subtitle: DI.languageService.translate('tile_lg_diagnostics_sub'),
+                    onTap: () => _runDiagnostics(context),
+                  ),
+                  // Set up NetworkLink (manual re-run, kept as a fallback —
+                  // this now also runs automatically right after connecting)
+                  _Tile(
+                    icon: Icons.sync,
+                    title: 'Set up NetworkLink on LG',
+                    subtitle: 'Fix Google Earth connection / sync configuration',
+                    onTap: () => _setupNetworkLink(context),
+                  ),
+                  const SizedBox(height: 20),
+
+                  SectionHeader(title: DI.languageService.translate('sec_api_keys')),
+                  _Tile(
+                    icon: Icons.vpn_key_outlined,
+                    title: DI.languageService.translate('tile_api_setup'),
+                    subtitle: DI.languageService.translate('tile_api_setup_sub'),
+                    onTap: () => Navigator.push(context,
+                        MaterialPageRoute(
+                            builder: (_) => const ApiSetupScreen())),
+                  ),
+                  const SizedBox(height: 20),
+
+                  SectionHeader(title: DI.languageService.translate('sec_about')),
+                  _Tile(
+                    icon: Icons.info_outline,
+                    title: 'Climate Change Storyteller',
+                    subtitle: DI.languageService.translate('tile_about_sub'),
+                    onTap: () => _showAboutDialog(context),
+                  ),
+                  const SizedBox(height: 32),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 }
 
@@ -152,11 +553,12 @@ class LGConnectScreen extends StatefulWidget {
 class _LGConnectScreenState extends State<LGConnectScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs;
-  final _ipCtrl   = TextEditingController(text: '192.168.56.101');
+  final _ipCtrl   = TextEditingController();
   final _portCtrl = TextEditingController(text: '22');
   final _userCtrl = TextEditingController(text: 'lg');
   final _passCtrl = TextEditingController(text: 'lg');
   final _screenCtrl= TextEditingController(text: '3');
+  final _webPortCtrl = TextEditingController(text: '81');
   bool _obscurePass  = true;
   bool _isConnecting = false;
 
@@ -164,6 +566,22 @@ class _LGConnectScreenState extends State<LGConnectScreen>
   void initState() {
     super.initState();
     _tabs = TabController(length: 2, vsync: this);
+    _loadSavedCredentials();
+  }
+
+  Future<void> _loadSavedCredentials() async {
+    final creds = await SecureStorageService.instance.getLgCredentials();
+    if (creds['ip'] != null) _ipCtrl.text = creds['ip']!;
+    if (creds['port'] != null) _portCtrl.text = creds['port']!;
+    if (creds['username'] != null) _userCtrl.text = creds['username']!;
+    if (creds['password'] != null) _passCtrl.text = creds['password']!;
+    if (creds['screen'] != null) _screenCtrl.text = creds['screen']!;
+    if (creds['webPort'] != null) {
+      _webPortCtrl.text = creds['webPort']!;
+    } else {
+      _webPortCtrl.text = '81';
+    }
+    if (mounted) setState(() {});
   }
 
   @override
@@ -171,7 +589,7 @@ class _LGConnectScreenState extends State<LGConnectScreen>
     _tabs.dispose();
     _ipCtrl.dispose(); _portCtrl.dispose();
     _userCtrl.dispose(); _passCtrl.dispose();
-    _screenCtrl.dispose();
+    _screenCtrl.dispose(); _webPortCtrl.dispose();
     super.dispose();
   }
 
@@ -181,22 +599,33 @@ class _LGConnectScreenState extends State<LGConnectScreen>
     final user = _userCtrl.text.trim().isEmpty ? 'lg' : _userCtrl.text.trim();
     final pass = _passCtrl.text.isEmpty ? 'lg' : _passCtrl.text;
     final screens = int.tryParse(_screenCtrl.text.trim()) ?? 5;
+    final webPort = int.tryParse(_webPortCtrl.text.trim());
 
     if (ip.isEmpty) { _showError('Please enter an IP address'); return; }
 
     setState(() => _isConnecting = true);
     try {
       final ok = await DI.lgService.connect(
-        ipAddress: ip, port: port, username: user, password: pass, screenCount: screens);
+        ipAddress: ip,
+        port: port,
+        username: user,
+        password: pass,
+        screenCount: screens,
+        webPort: webPort,
+      );
       if (!mounted) return;
+
       if (ok) {
         final screens = DI.lgService.state.screenCount;
         final latency = DI.lgService.state.latencyMs;
+        final wPort = DI.lgService.state.webPort;
+
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Row(children: [
             const Icon(Icons.check_circle, color: Colors.white, size: 18),
             const SizedBox(width: 8),
-            Text('Connected! $screens screens · ${latency}ms'),
+            Text('Connected! $screens screens · Web Port: $wPort · ${latency}ms'),
           ]),
           backgroundColor: AppColors.good,
         ));
@@ -256,7 +685,7 @@ class _LGConnectScreenState extends State<LGConnectScreen>
         ),
       ),
       body: TabBarView(controller: _tabs, children: [
-        _ManualTab(ipCtrl: _ipCtrl, portCtrl: _portCtrl,
+        _ManualTab(ipCtrl: _ipCtrl, portCtrl: _portCtrl, webPortCtrl: _webPortCtrl,
           userCtrl: _userCtrl, passCtrl: _passCtrl, screenCtrl: _screenCtrl,
           obscurePass: _obscurePass, isConnecting: _isConnecting,
           onTogglePass: () => setState(() => _obscurePass = !_obscurePass),
@@ -268,11 +697,11 @@ class _LGConnectScreenState extends State<LGConnectScreen>
 }
 
 class _ManualTab extends StatelessWidget {
-  final TextEditingController ipCtrl, portCtrl, userCtrl, passCtrl, screenCtrl;
+  final TextEditingController ipCtrl, portCtrl, webPortCtrl, userCtrl, passCtrl, screenCtrl;
   final bool obscurePass, isConnecting;
   final VoidCallback onTogglePass, onConnect;
 
-  const _ManualTab({required this.ipCtrl, required this.portCtrl,
+  const _ManualTab({required this.ipCtrl, required this.portCtrl, required this.webPortCtrl,
       required this.userCtrl, required this.passCtrl, required this.screenCtrl,
       required this.obscurePass, required this.isConnecting,
       required this.onTogglePass, required this.onConnect});
@@ -298,12 +727,21 @@ class _ManualTab extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(child: TextField(controller: portCtrl,
               style: const TextStyle(color: AppColors.textPrimary),
-              decoration: const InputDecoration(labelText: 'Port'))),
+              decoration: const InputDecoration(labelText: 'SSH Port'))),
             const SizedBox(width: 12),
             Expanded(child: TextField(controller: screenCtrl,
               style: const TextStyle(color: AppColors.textPrimary),
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(labelText: 'Screens'))),
+          ]),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(child: TextField(controller: webPortCtrl,
+              style: const TextStyle(color: AppColors.textPrimary),
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Web Server Port (80/81)',
+                hintText: '81 (auto-detect if 0 or empty)'))),
           ]),
           const SizedBox(height: 16),
           const SectionHeader(title: 'SSH Credentials'),

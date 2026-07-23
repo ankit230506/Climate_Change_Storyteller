@@ -19,6 +19,14 @@ class SecureStorageService {
   static const _kLgUser    = 'lg_username';
   static const _kLgPass    = 'lg_password';
   static const _kLgScreen  =  'lg_screen';
+  static const _kLgWebPort =  'lg_web_port';
+  static const _kLanguageCode = 'app_language_code';
+
+  // ── Language Settings ───────────────────────────────────────────────────
+  Future<void> saveLanguageCode(String code) =>
+      _storage.write(key: _kLanguageCode, value: code);
+
+  Future<String?> getLanguageCode() => _storage.read(key: _kLanguageCode);
 
   // ── Gemini API key (required) ────────────────────────────────────────────
   Future<void> saveGeminiKey(String key) =>
@@ -44,6 +52,7 @@ class SecureStorageService {
     required String username,
     required String password,
     required String screen,
+    required String webPort,
   }) async {
     await Future.wait([
       _storage.write(key: _kLgIp,   value: ip),
@@ -51,6 +60,7 @@ class SecureStorageService {
       _storage.write(key: _kLgUser, value: username),
       _storage.write(key: _kLgPass, value: password),
       _storage.write(key: _kLgScreen, value: screen), 
+      _storage.write(key: _kLgWebPort, value: webPort),
     ]);
   }
 
@@ -61,6 +71,7 @@ class SecureStorageService {
       _storage.read(key: _kLgUser),
       _storage.read(key: _kLgPass),
       _storage.read(key: _kLgScreen),
+      _storage.read(key: _kLgWebPort),
     ]);
     return {
       'ip':       results[0],
@@ -68,6 +79,7 @@ class SecureStorageService {
       'username': results[2],
       'password': results[3],
       'screen':   results[4],
+      'webPort':  results[5],
     };
   }
 

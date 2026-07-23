@@ -119,7 +119,7 @@ class LGStatusCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    isConnected ? 'LG Rig · Connected' : 'LG Rig · Disconnected',
+                    isConnected ? 'LG Rig · Connected (port: ${rigState.webPort})' : 'LG Rig · Disconnected',
                     style: AppTypography.bodySmall.copyWith(
                       color: AppColors.textPrimary,
                       fontWeight: FontWeight.w600,

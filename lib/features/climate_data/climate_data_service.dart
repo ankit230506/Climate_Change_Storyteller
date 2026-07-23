@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:http/http.dart' as http;
 import 'package:climate_storyteller/features/climate_data/climate_stats.dart';
 import 'package:climate_storyteller/features/climate_data/aqi_reading.dart';
@@ -318,6 +319,8 @@ class ClimateDataService {
       </Point>
     </Placemark>
 
+    ${_buildDeforestation3DFolder(regionId, year)}
+
   </Document>
 </kml>''';
   }
@@ -383,8 +386,75 @@ class ClimateDataService {
       </LineString>
     </Placemark>
 
+    ${_buildComparison3DFolder(regionId)}
+
   </Document>
 </kml>''';
+  }
+
+  String _buildDeforestation3DFolder(String regionId, int year) {
+    final bbox = getBBox(regionId);
+    final centerLat = (bbox.north + bbox.south) / 2;
+    final centerLon = (bbox.east + bbox.west) / 2;
+    final latSpan = (bbox.north - bbox.south).abs();
+    final lonSpan = (bbox.east - bbox.west).abs();
+    final maxSpan = latSpan > lonSpan ? latSpan : lonSpan;
+    // Scale density based on the year (decreasing as deforestation increases)
+    final factor = (1.0 - (year - 2000) * 0.01).clamp(0.4, 1.0);
+    final height = 50000.0 + factor * 400000.0;
+    final colors = LG3DVisuals.getForestColors(factor);
+
+    return LG3DVisuals.build3DPyramid(
+      centerLat: centerLat,
+      centerLon: centerLon,
+      spanDeg: maxSpan * 0.8,
+      heightMeters: height,
+      face1ColorAbgr: colors[0],
+      face2ColorAbgr: colors[1],
+      face3ColorAbgr: colors[2],
+      face4ColorAbgr: colors[3],
+      name: 'Forest Canopy Density (3D)',
+      description: '3D Forest density for year $year',
+    );
+  }
+
+  String _buildComparison3DFolder(String regionId) {
+    final bbox = getBBox(regionId);
+    final centerLat = (bbox.north + bbox.south) / 2;
+    final centerLon = (bbox.east + bbox.west) / 2;
+    final latSpan = (bbox.north - bbox.south).abs();
+    final lonSpan = (bbox.east - bbox.west).abs();
+    final maxSpan = latSpan > lonSpan ? latSpan : lonSpan;
+
+    final leftLon = centerLon - maxSpan / 4;
+    final leftColors = LG3DVisuals.getForestColors(1.0);
+    final leftPyramid = LG3DVisuals.build3DPyramid(
+      centerLat: centerLat,
+      centerLon: leftLon,
+      spanDeg: maxSpan * 0.4,
+      heightMeters: 450000.0,
+      face1ColorAbgr: leftColors[0],
+      face2ColorAbgr: leftColors[1],
+      face3ColorAbgr: leftColors[2],
+      face4ColorAbgr: leftColors[3],
+      name: 'Forest 2000 (3D)',
+    );
+
+    final rightLon = centerLon + maxSpan / 4;
+    final rightColors = LG3DVisuals.getForestColors(0.5);
+    final rightPyramid = LG3DVisuals.build3DPyramid(
+      centerLat: centerLat,
+      centerLon: rightLon,
+      spanDeg: maxSpan * 0.4,
+      heightMeters: 250000.0,
+      face1ColorAbgr: rightColors[0],
+      face2ColorAbgr: rightColors[1],
+      face3ColorAbgr: rightColors[2],
+      face4ColorAbgr: rightColors[3],
+      name: 'Forest Loss 2023 (3D)',
+    );
+
+    return '<Folder><name>Forest Comparison (3D)</name><open>1</open>$leftPyramid$rightPyramid</Folder>';
   }
 
   Future<void> sendToLG({required String regionId, int year = 2023}) async {
@@ -393,10 +463,7 @@ class ClimateDataService {
     await lgService.sendKml(filename, kmlContent: kml);
 
     final bbox = getBBox(regionId);
-    final latSpan = (bbox.north - bbox.south).abs();
-    final lonSpan = (bbox.east - bbox.west).abs();
-    final span = latSpan > lonSpan ? latSpan : lonSpan;
-    final altitude = span * 110000 * 2.5;
+    final altitude = _cameraRange(bbox);
 
     await lgService.flyTo(
       latitude: (bbox.north + bbox.south) / 2,
@@ -525,7 +592,8 @@ class ClimateDataService {
     final latSpan = (bbox.north - bbox.south).abs();
     final lonSpan = (bbox.east - bbox.west).abs();
     final span = latSpan > lonSpan ? latSpan : lonSpan;
-    return span * 110000 * 2.5;
+    final range = span * 110000 * 1.2;
+    return range.clamp(400000.0, 1500000.0);
   }
 
   String _regionName(String id) => switch (id) {

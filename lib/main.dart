@@ -6,9 +6,11 @@ import 'package:climate_storyteller/features/explore/onboarding_screen.dart';
 import 'package:climate_storyteller/features/explore/region_detail_screen.dart';
 import 'package:climate_storyteller/core/constant/app_routes.dart';
 import 'package:climate_storyteller/features/explore/climate_region.dart';
+import 'package:climate_storyteller/core/di/injection_container.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await DI.languageService.init();
 
   // Lock to portrait orientation (smartphone controller)
   await SystemChrome.setPreferredOrientations([
