@@ -207,10 +207,102 @@ class ClimateDataService {
     return _regionBounds[regionId] ?? _regionBounds['amazon']!;
   }
 
+  String buildAqiKml({required String city, required List<AqiReading> readings}) {
+    final coords = cityCoordinates[city] ?? {'lat': 28.6139, 'lon': 77.2090};
+    final lat = coords['lat']!;
+    final lon = coords['lon']!;
+
+    double pm25 = 25.0;
+    for (final r in readings) {
+      if (r.parameter == 'pm25') pm25 = r.value;
+    }
+    final severityFactor = (pm25 / 180.0).clamp(0.12, 0.95);
+
+    final host = lgService.state.ipAddress ?? 'localhost';
+    final port = lgService.state.webPort;
+
+    return '''<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"
+     xmlns:gx="http://www.google.com/kml/ext/2.2">
+  <Document>
+    <name>Air Quality Index (AQI) — $city</name>
+    <description><![CDATA[Real-time OpenAQ Air Quality Data for $city. PM2.5: ${pm25.toStringAsFixed(1)} µg/m³]]></description>
+
+    <LookAt>
+      <longitude>$lon</longitude>
+      <latitude>$lat</latitude>
+      <altitude>0</altitude>
+      <heading>30</heading>
+      <tilt>60</tilt>
+      <range>450000</range>
+      <altitudeMode>relativeToGround</altitudeMode>
+    </LookAt>
+
+    <!-- Screen 1 Overlay: Liquid Galaxy Logo -->
+    <ScreenOverlay>
+      <name>Liquid Galaxy Logo</name>
+      <Icon>
+        <href>http://$host:$port/kml/lg_logo.png</href>
+      </Icon>
+      <overlayXY x="0" y="1" xunits="fraction" yunits="fraction"/>
+      <screenXY x="0.02" y="0.95" xunits="fraction" yunits="fraction"/>
+      <rotationXY x="0" y="0" xunits="fraction" yunits="fraction"/>
+      <size x="240" y="100" xunits="pixels" yunits="pixels"/>
+    </ScreenOverlay>
+
+    <!-- Screen 5 Overlay: AQI Legend -->
+    <ScreenOverlay>
+      <name>AQI Environmental Legend</name>
+      <Icon>
+        <href>http://$host:$port/kml/legend_aqi.png</href>
+      </Icon>
+      <overlayXY x="1" y="0" xunits="fraction" yunits="fraction"/>
+      <screenXY x="0.98" y="0.05" xunits="fraction" yunits="fraction"/>
+      <rotationXY x="0" y="0" xunits="fraction" yunits="fraction"/>
+      <size x="230" y="250" xunits="pixels" yunits="pixels"/>
+    </ScreenOverlay>
+
+    <!-- 3D Extruded Grid Mesh & Station Spikes -->
+    ${LG3DVisuals.build3DMeshAndSpikes(
+      centerLat: lat,
+      centerLon: lon,
+      spanDeg: 3.5,
+      category: 'aqi',
+      severityFactor: severityFactor,
+      name: '$city Air Quality Mesh & Monitoring Spikes',
+    )}
+
+    <!-- City Station Placemark -->
+    <Placemark>
+      <name>$city Air Quality Center</name>
+      <description><![CDATA[
+        <b>$city Air Quality Index</b><br/>
+        PM2.5: ${pm25.toStringAsFixed(1)} µg/m³<br/>
+        Source: OpenAQ Real-Time Global Air Quality API
+      ]]></description>
+      <Point>
+        <coordinates>$lon,$lat,0</coordinates>
+      </Point>
+    </Placemark>
+  </Document>
+</kml>''';
+  }
+
+  static const Map<String, Map<String, double>> cityCoordinates = {
+    'Delhi':    {'lat': 28.6139, 'lon': 77.2090},
+    'Beijing':  {'lat': 39.9042, 'lon': 116.4074},
+    'London':   {'lat': 51.5074, 'lon': -0.1278},
+    'New York': {'lat': 40.7128, 'lon': -74.0060},
+    'Jakarta':  {'lat': -6.2088, 'lon': 106.8456},
+    'Amazon':   {'lat': -3.4653, 'lon': -62.2159},
+  };
+
   String buildDeforestationKml({required String regionId, int year = 2023}) {
     final bbox = getBBox(regionId);
     final tileUrl = _buildGfwUrl(year);
     final canopyUrl = _buildCanopyUrl();
+    final host = lgService.state.ipAddress ?? 'localhost';
+    final port = lgService.state.webPort;
 
     return '''<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2"
@@ -229,11 +321,35 @@ class ClimateDataService {
       <longitude>${(bbox.east + bbox.west) / 2}</longitude>
       <latitude>${(bbox.north + bbox.south) / 2}</latitude>
       <altitude>0</altitude>
-      <heading>0</heading>
-      <tilt>0</tilt>
+      <heading>30</heading>
+      <tilt>60</tilt>
       <range>${_cameraRange(bbox)}</range>
       <altitudeMode>relativeToGround</altitudeMode>
     </LookAt>
+
+    <!-- Screen 1 Overlay: Liquid Galaxy Logo -->
+    <ScreenOverlay>
+      <name>Liquid Galaxy Logo</name>
+      <Icon>
+        <href>http://$host:$port/kml/lg_logo.png</href>
+      </Icon>
+      <overlayXY x="0" y="1" xunits="fraction" yunits="fraction"/>
+      <screenXY x="0.02" y="0.95" xunits="fraction" yunits="fraction"/>
+      <rotationXY x="0" y="0" xunits="fraction" yunits="fraction"/>
+      <size x="240" y="100" xunits="pixels" yunits="pixels"/>
+    </ScreenOverlay>
+
+    <!-- Screen 5 Overlay: Forest Legend -->
+    <ScreenOverlay>
+      <name>Forest Environmental Legend</name>
+      <Icon>
+        <href>http://$host:$port/kml/legend_forest.png</href>
+      </Icon>
+      <overlayXY x="1" y="0" xunits="fraction" yunits="fraction"/>
+      <screenXY x="0.98" y="0.05" xunits="fraction" yunits="fraction"/>
+      <rotationXY x="0" y="0" xunits="fraction" yunits="fraction"/>
+      <size x="230" y="250" xunits="pixels" yunits="pixels"/>
+    </ScreenOverlay>
 
     <!-- Existing tree canopy (green layer, bottom) -->
     <GroundOverlay>
@@ -399,22 +515,15 @@ class ClimateDataService {
     final latSpan = (bbox.north - bbox.south).abs();
     final lonSpan = (bbox.east - bbox.west).abs();
     final maxSpan = latSpan > lonSpan ? latSpan : lonSpan;
-    // Scale density based on the year (decreasing as deforestation increases)
-    final factor = (1.0 - (year - 2000) * 0.01).clamp(0.4, 1.0);
-    final height = 50000.0 + factor * 400000.0;
-    final colors = LG3DVisuals.getForestColors(factor);
+    final factor = ((year - 2000) * 0.035).clamp(0.12, 0.95);
 
-    return LG3DVisuals.build3DPyramid(
+    return LG3DVisuals.build3DMeshAndSpikes(
       centerLat: centerLat,
       centerLon: centerLon,
-      spanDeg: maxSpan * 0.8,
-      heightMeters: height,
-      face1ColorAbgr: colors[0],
-      face2ColorAbgr: colors[1],
-      face3ColorAbgr: colors[2],
-      face4ColorAbgr: colors[3],
-      name: 'Forest Canopy Density (3D)',
-      description: '3D Forest density for year $year',
+      spanDeg: maxSpan * 0.75,
+      category: 'forest',
+      severityFactor: factor,
+      name: '${_regionName(regionId)} Deforestation 3D Mesh & Spikes ($year)',
     );
   }
 

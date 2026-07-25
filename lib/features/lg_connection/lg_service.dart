@@ -9,6 +9,7 @@ import 'package:climate_storyteller/features/explore/climate_region.dart';
 import 'package:climate_storyteller/features/explore/climate_era.dart';
 import 'package:climate_storyteller/features/climate_data/ipcc_data.dart';
 import 'package:climate_storyteller/features/lg_connection/lg_rig_state.dart';
+import 'package:climate_storyteller/features/lg_connection/lg_overlays.dart';
 import 'package:climate_storyteller/core/storage/secure_storage_service.dart';
 
 class LgService {
@@ -180,6 +181,10 @@ class LgService {
   Future<void> sendKml(String kmlFilename, {String? kmlContent}) async {
     if (_client == null) throw Exception('Not connected');
 
+    // Automatically upload logo and environmental legend PNG overlays to the LG web server
+    final category = _extractCategoryFromFilename(kmlFilename);
+    await _uploadOverlayAssets(category);
+
     if (kmlContent != null && kmlContent.isNotEmpty) {
       final b64 = base64Encode(utf8.encode(kmlContent));
       await execute(
@@ -229,6 +234,31 @@ class LgService {
     await execute("echo '$kmlUrl' > $_queryFile");
 
     _update(_state.copyWith(currentKml: kmlFilename));
+  }
+
+  Future<void> _uploadOverlayAssets(String category) async {
+    if (_client == null) return;
+    try {
+      final logoPng = LGOverlays.createLgLogoPng();
+      final logoB64 = base64Encode(logoPng);
+      await execute("echo '$logoB64' | base64 -d > $_kmlDir/lg_logo.png");
+
+      final legendPng = LGOverlays.createLegendPng(category);
+      final legendB64 = base64Encode(legendPng);
+      await execute("echo '$legendB64' | base64 -d > $_kmlDir/legend_$category.png");
+
+      await execute("chmod 644 $_kmlDir/*.png 2>/dev/null");
+    } catch (_) {}
+  }
+
+  String _extractCategoryFromFilename(String filename) {
+    final lower = filename.toLowerCase();
+    if (lower.contains('aqi')) return 'aqi';
+    if (lower.contains('forest')) return 'forest';
+    if (lower.contains('sealevel') || lower.contains('sea_level')) return 'sealevel';
+    if (lower.contains('glacier') || lower.contains('ice')) return 'glacier';
+    if (lower.contains('heat')) return 'heat';
+    return 'aqi';
   }
 
   Future<void> flyTo({
@@ -526,6 +556,9 @@ class LgService {
         ? '<Data name="noaa_live_temp"><value>$noaaGlobalTemp°C</value></Data>'
         : '';
 
+    final host = _state.ipAddress ?? 'localhost';
+    final port = _state.webPort;
+
     return '''<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2"
      xmlns:gx="http://www.google.com/kml/ext/2.2">
@@ -545,6 +578,30 @@ class LgService {
       <range>${region.altitude}</range>
       <altitudeMode>relativeToGround</altitudeMode>
     </LookAt>
+
+    <!-- Screen 1 Overlay: Liquid Galaxy Logo -->
+    <ScreenOverlay>
+      <name>Liquid Galaxy Logo</name>
+      <Icon>
+        <href>http://$host:$port/kml/lg_logo.png</href>
+      </Icon>
+      <overlayXY x="0" y="1" xunits="fraction" yunits="fraction"/>
+      <screenXY x="0.02" y="0.95" xunits="fraction" yunits="fraction"/>
+      <rotationXY x="0" y="0" xunits="fraction" yunits="fraction"/>
+      <size x="240" y="100" xunits="pixels" yunits="pixels"/>
+    </ScreenOverlay>
+
+    <!-- Screen 5 Overlay: Environmental Index Legend -->
+    <ScreenOverlay>
+      <name>Environmental Index Legend</name>
+      <Icon>
+        <href>http://$host:$port/kml/legend_${region.category}.png</href>
+      </Icon>
+      <overlayXY x="1" y="0" xunits="fraction" yunits="fraction"/>
+      <screenXY x="0.98" y="0.05" xunits="fraction" yunits="fraction"/>
+      <rotationXY x="0" y="0" xunits="fraction" yunits="fraction"/>
+      <size x="230" y="250" xunits="pixels" yunits="pixels"/>
+    </ScreenOverlay>
 
     <!-- NASA GIBS overlay -->
     <GroundOverlay>
@@ -619,7 +676,7 @@ class LgService {
         break;
     }
 
-    // 3D extruded grid layers (visible on screen)
+    // 3D extruded grid mesh + hotspot spikes (visible across LG screens 2, 3, 4)
     buffer.writeln(_build3DVisuals(region, era));
 
     return buffer.toString();
@@ -627,82 +684,37 @@ class LgService {
 
   String _build3DVisuals(ClimateRegion region, ClimateEra era) {
     final localData = getRegionData(region.id);
+    final eraYear = int.parse(era.label);
 
-    switch (region.category) {
-      case 'glacier':
-        final iceExtentKm2 = localData?.iceExtentKm2[int.parse(era.label)] ?? 10000.0;
-        final baseExtent = localData?.iceExtentKm2[1900] ?? 10000.0;
-        final factor = (iceExtentKm2 / baseExtent).clamp(0.0, 1.0);
-        final height = 50000.0 + factor * 450000.0;
-        final colors = LG3DVisuals.getGlacierColors(factor);
-
-        return LG3DVisuals.build3DBox(
-          centerLat: region.latitude,
-          centerLon: region.longitude,
-          spanDeg: 5.0,
-          heightMeters: height,
-          faceColorsAbgr: colors,
-          name: 'Glacier Thickness (3D Box)',
-          description: '3D Glacier thickness representing volume in year ${era.label}',
-        );
-
-      case 'sealevel':
-        final seaLevelMm = localData?.seaLevelMm[int.parse(era.label)] ?? 0.0;
-        final factor = (seaLevelMm / 1000.0).clamp(0.0, 1.0);
-        final height = 20000.0 + factor * 380000.0;
-        final colors = LG3DVisuals.getSeaLevelColors(factor);
-
-        return LG3DVisuals.build3DOctagonalColumn(
-          centerLat: region.latitude,
-          centerLon: region.longitude,
-          radiusDeg: 1.75, // radius is half of span 3.5
-          heightMeters: height,
-          sideColorsAbgr: colors,
-          name: 'Sea Level Rise (3D Column)',
-          description: '3D Sea level inundation representing height in year ${era.label}',
-        );
-
-      case 'forest':
-        final forestCoverPct = localData?.forestCoverPct[int.parse(era.label)] ?? 100.0;
-        final factor = (forestCoverPct / 100.0).clamp(0.0, 1.0);
-        final height = 50000.0 + factor * 400000.0;
-        final colors = LG3DVisuals.getForestColors(factor);
-
-        return LG3DVisuals.build3DPyramid(
-          centerLat: region.latitude,
-          centerLon: region.longitude,
-          spanDeg: 6.0,
-          heightMeters: height,
-          face1ColorAbgr: colors[0],
-          face2ColorAbgr: colors[1],
-          face3ColorAbgr: colors[2],
-          face4ColorAbgr: colors[3],
-          name: 'Forest Canopy Density (3D Pyramid)',
-          description: '3D Forest canopy density in year ${era.label}',
-        );
-
-      case 'heat':
-        final heatFactor = switch (era) {
+    final factor = switch (region.category) {
+      'glacier' => (() {
+          final ice = localData?.iceExtentKm2[eraYear] ?? 10000.0;
+          final base = localData?.iceExtentKm2[1900] ?? 10000.0;
+          return (1.0 - (ice / base)).clamp(0.1, 0.95);
+        })(),
+      'sealevel' => (() {
+          final sl = localData?.seaLevelMm[eraYear] ?? 0.0;
+          return (sl / 1000.0).clamp(0.1, 0.95);
+        })(),
+      'forest' => (() {
+          final fc = localData?.forestCoverPct[eraYear] ?? 100.0;
+          return (1.0 - (fc / 100.0)).clamp(0.1, 0.95);
+        })(),
+      _ => switch (era) { // heat & aqi
           ClimateEra.preindustrial1900 => 0.15,
           ClimateEra.present2026       => 0.55,
-          ClimateEra.projected2100     => 1.0,
-        };
-        final height = 40000.0 + heatFactor * 360000.0;
-        final colors = LG3DVisuals.getHeatColors(heatFactor);
+          ClimateEra.projected2100     => 0.95,
+        },
+    };
 
-        return LG3DVisuals.build3DHeatDome(
-          centerLat: region.latitude,
-          centerLon: region.longitude,
-          radiusDeg: 2.75, // radius is half of span 5.5
-          heightMeters: height,
-          faceColorsAbgr: colors,
-          name: 'Extreme Heat Dome (3D)',
-          description: '3D Temperature anomaly representing heat intensity in year ${era.label}',
-        );
-
-      default:
-        return '';
-    }
+    return LG3DVisuals.build3DMeshAndSpikes(
+      centerLat: region.latitude,
+      centerLon: region.longitude,
+      spanDeg: 4.5,
+      category: region.category,
+      severityFactor: factor,
+      name: '${region.name} 3D Mesh & Hotspot Spikes',
+    );
   }
 
   String _heatPolygon(ClimateRegion region, ClimateEra era) {
@@ -1011,8 +1023,135 @@ class LgService {
 
 
 
-  class LG3DVisuals {
+class LG3DVisuals {
   LG3DVisuals._();
+
+  static String build3DMeshAndSpikes({
+    required double centerLat,
+    required double centerLon,
+    required double spanDeg,
+    required String category,
+    required double severityFactor,
+    String name = '3D Mesh & Hotspot Spikes',
+  }) {
+    final sb = StringBuffer();
+    sb.writeln('<Folder><name>$name</name><visibility>1</visibility><open>1</open>');
+
+    const rows = 4;
+    const cols = 4;
+    final cellLatSpan = spanDeg / rows;
+    final cellLonSpan = spanDeg / cols;
+    final startLat = centerLat - spanDeg / 2;
+    final startLon = centerLon - spanDeg / 2;
+
+    for (int r = 0; r < rows; r++) {
+      for (int c = 0; c < cols; c++) {
+        final w = startLon + c * cellLonSpan;
+        final e = w + cellLonSpan;
+        final s = startLat + r * cellLatSpan;
+        final n = s + cellLatSpan;
+
+        final cellCenterLat = (s + n) / 2;
+        final cellCenterLon = (w + e) / 2;
+
+        final dist = math.sqrt(
+          math.pow((cellCenterLat - centerLat) / spanDeg, 2) +
+          math.pow((cellCenterLon - centerLon) / spanDeg, 2),
+        );
+        final cellSeverity = (severityFactor * (1.0 - dist * 0.6) + 0.12 * math.sin(r * 2.5 + c * 1.8)).clamp(0.08, 0.95);
+
+        final polyColor = _getMeshColorAbgr(category, cellSeverity);
+        final wireColor = _getWireframeColorAbgr(category, cellSeverity);
+        final height = 25000.0 + cellSeverity * 350000.0;
+
+        final hStr = height.toStringAsFixed(1);
+        final swStr = '${w.toStringAsFixed(6)},${s.toStringAsFixed(6)},$hStr';
+        final seStr = '${e.toStringAsFixed(6)},${s.toStringAsFixed(6)},$hStr';
+        final neStr = '${e.toStringAsFixed(6)},${n.toStringAsFixed(6)},$hStr';
+        final nwStr = '${w.toStringAsFixed(6)},${n.toStringAsFixed(6)},$hStr';
+
+        sb.writeln('''
+        <Placemark>
+          <name>Mesh Zone (${r + 1},${c + 1})</name>
+          <Style>
+            <PolyStyle>
+              <color>$polyColor</color>
+              <outline>1</outline>
+            </PolyStyle>
+            <LineStyle>
+              <color>$wireColor</color>
+              <width>2.5</width>
+            </LineStyle>
+          </Style>
+          <Polygon>
+            <extrude>1</extrude>
+            <tessellate>1</tessellate>
+            <altitudeMode>relativeToGround</altitudeMode>
+            <outerBoundaryIs>
+              <LinearRing>
+                <coordinates>
+                  $swStr
+                  $seStr
+                  $neStr
+                  $nwStr
+                  $swStr
+                </coordinates>
+              </LinearRing>
+            </outerBoundaryIs>
+          </Polygon>
+        </Placemark>
+        ''');
+      }
+    }
+
+    // 3D Cones / Pyramids at Hotspot Nodes
+    final hotspotOffsets = [
+      {'dLat': 0.12,  'dLon': -0.12, 'scale': 1.0},
+      {'dLat': -0.20, 'dLon': 0.18,  'scale': 0.85},
+      {'dLat': 0.25,  'dLon': 0.15,  'scale': 0.72},
+      {'dLat': -0.15, 'dLon': -0.22, 'scale': 0.65},
+    ];
+
+    for (int i = 0; i < hotspotOffsets.length; i++) {
+      final hs = hotspotOffsets[i];
+      final hsLat = centerLat + hs['dLat']! * spanDeg;
+      final hsLon = centerLon + hs['dLon']! * spanDeg;
+      final pSpan = cellLonSpan * 0.40;
+      final peakHeight = 140000.0 + severityFactor * hs['scale']! * 380000.0;
+
+      sb.writeln(build3DPyramid(
+        centerLat: hsLat,
+        centerLon: hsLon,
+        spanDeg: pSpan,
+        heightMeters: peakHeight,
+        face1ColorAbgr: 'ff202020', // Dark metallic obsidian spike
+        face2ColorAbgr: 'ff383838',
+        face3ColorAbgr: 'ff151515',
+        face4ColorAbgr: 'ff484848',
+        name: 'Hotspot Node ${i + 1}',
+        description: '3D Environmental Sensor Spike Node',
+      ));
+    }
+
+    sb.writeln('</Folder>');
+    return sb.toString();
+  }
+
+  static String _getMeshColorAbgr(String category, double severity) {
+    if (severity < 0.25) return '8833cc44'; // Good (Emerald Green)
+    if (severity < 0.45) return '8855ddaa'; // Fair (Yellow-Green)
+    if (severity < 0.65) return '8800ddee'; // Moderate (Golden Yellow)
+    if (severity < 0.82) return '880088ff'; // Poor (Orange)
+    return '880000ff';                       // Very Poor (Deep Red)
+  }
+
+  static String _getWireframeColorAbgr(String category, double severity) {
+    if (severity < 0.25) return 'ffaaffaa';
+    if (severity < 0.45) return 'ffffffaa';
+    if (severity < 0.65) return 'ffffdd66';
+    if (severity < 0.82) return 'ffff8800';
+    return 'ffff0000';
+  }
 
   static String wrapDocument({
     required String name,
