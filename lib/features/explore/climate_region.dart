@@ -31,7 +31,7 @@ const List<ClimateRegion> kDefaultRegions = [
     category: 'glacier',
     latitude: 78.2232,
     longitude: 15.6267,
-    altitude: 1200000,
+    altitude: 200000,
     riskLevel: 'Critical',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'arctic_1900_glacier.kml',
@@ -45,7 +45,7 @@ const List<ClimateRegion> kDefaultRegions = [
     category: 'glacier',
     latitude: 27.9881,
     longitude: 86.9250,
-    altitude: 1000000,
+    altitude: 180000,
     riskLevel: 'High',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'himalaya_1900_glacier.kml',
@@ -59,7 +59,7 @@ const List<ClimateRegion> kDefaultRegions = [
     category: 'forest',
     latitude: -3.4653,
     longitude: -62.2159,
-    altitude: 1200000,
+    altitude: 250000,
     riskLevel: 'Critical',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'amazon_1900_forest.kml',
@@ -73,7 +73,7 @@ const List<ClimateRegion> kDefaultRegions = [
     category: 'sealevel',
     latitude: -8.7832,
     longitude: 179.0000,
-    altitude: 1000000,
+    altitude: 180000,
     riskLevel: 'Critical',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'pacific_1900_sealevel.kml',
@@ -87,7 +87,7 @@ const List<ClimateRegion> kDefaultRegions = [
     category: 'heat',
     latitude: 23.4162,
     longitude: 25.6628,
-    altitude: 1200000,
+    altitude: 220000,
     riskLevel: 'High',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'sahara_1900_heat.kml',
@@ -101,7 +101,7 @@ const List<ClimateRegion> kDefaultRegions = [
     category: 'sealevel',
     latitude: 3.2028,
     longitude: 73.2207,
-    altitude: 800000,
+    altitude: 150000,
     riskLevel: 'Critical',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'maldives_1900_sealevel.kml',

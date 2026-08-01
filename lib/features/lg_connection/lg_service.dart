@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -14,6 +15,7 @@ import 'package:climate_storyteller/core/storage/secure_storage_service.dart';
 
 class LgService {
   SSHClient? _client;
+  SftpClient? _sftp;
   LGRigState _state = const LGRigState();
   final _stateCtrl = StreamController<LGRigState>.broadcast();
   Timer? _keepaliveTimer;
@@ -70,6 +72,14 @@ class LgService {
       );
       await client.authenticated;
       _client = client;
+
+      // Open a persistent SFTP session for file uploads
+      try {
+        _sftp = await client.sftp();
+      } catch (_) {
+        // SFTP may fail on some setups; fall back to shell commands
+        _sftp = null;
+      }
 
       // Verify kml folder exists and is writable, create if not
       await execute('mkdir -p $_kmlDir');
@@ -162,6 +172,8 @@ class LgService {
   Future<void> disconnect() async {
     _keepaliveTimer?.cancel();
     _keepaliveTimer = null;
+    _sftp?.close();
+    _sftp = null;
     _client?.close();
     _client = null;
     _update(const LGRigState());
@@ -185,53 +197,51 @@ class LgService {
     final category = _extractCategoryFromFilename(kmlFilename);
     await _uploadOverlayAssets(category);
 
-    if (kmlContent != null && kmlContent.isNotEmpty) {
-      final b64 = base64Encode(utf8.encode(kmlContent));
-      await execute(
-        "echo '$b64' | base64 -d > $_kmlDir/$kmlFilename",
-      );
-    }
-
+    // Build the KML that Google Earth will actually render. If the caller
+    // supplied full KML content, use it; otherwise create a NetworkLink
+    // wrapper that points to the file on the web server.
     final host = _state.ipAddress ?? 'localhost';
     final kmlUrl = 'http://$host:${_state.webPort}/kml/$kmlFilename';
     final netLinkKml = _buildNetworkLinkKml(kmlUrl);
-    final b64NetLink = base64Encode(utf8.encode(netLinkKml));
 
-    // 1. Write the NetworkLink KML files to the master node for all screens
-    for (int i = 1; i <= _state.screenCount; i++) {
-      await execute("echo '$b64NetLink' | base64 -d > $_kmlDir/kml_$i.kml");
-      await execute("echo '$b64NetLink' | base64 -d > $_kmlDir/slave_$i.kml");
-    }
-    await execute("echo '$b64NetLink' | base64 -d > $_kmlDir/master.kml");
-
-    // 2. Write the NetworkLink KML files to the slave nodes (as backup)
-    for (int i = 2; i <= _state.screenCount; i++) {
-      try {
-        final cmd =
-            'sshpass -p lg ssh -o StrictHostKeyChecking=no '
-            'lg@lg$i "echo \'$b64NetLink\' | base64 -d > $_kmlDir/kml_$i.kml && echo \'$b64NetLink\' | base64 -d > $_kmlDir/slave_$i.kml" 2>&1';
-        await execute(cmd);
-      } catch (_) {}
-    }
-
-    // 3. Write the sync files that Google Earth's MyPlaces.kml NetworkLink
-    // actually polls (every 2s, per setupNetworkLink()). These MUST contain
-    // valid KML XML, not a plain URL string, or GE will silently fail to
-    // parse them and nothing will render on screen.
+    // 1. Upload the actual KML content file to the master's web server via
+    //    SFTP.  This completely bypasses shell escaping / ARG_MAX issues
+    //    that caused large KMLs to silently fail.
     if (kmlContent != null && kmlContent.isNotEmpty) {
-      final b64Content = base64Encode(utf8.encode(kmlContent));
-      await execute("echo '$b64Content' | base64 -d > $_kmlSyncFile");
-      for (int i = 1; i <= _state.screenCount; i++) {
-        await execute("echo '$b64Content' | base64 -d > /var/www/html/kmls_$i.txt");
-      }
-    } else {
-      await execute("echo '$b64NetLink' | base64 -d > $_kmlSyncFile");
-      for (int i = 1; i <= _state.screenCount; i++) {
-        await execute("echo '$b64NetLink' | base64 -d > /var/www/html/kmls_$i.txt");
-      }
+      await _sftpUpload('$_kmlDir/$kmlFilename', utf8.encode(kmlContent));
     }
 
-    await execute("echo '$kmlUrl' > $_queryFile");
+    // 2. Upload NetworkLink wrappers for each screen slot (master reads
+    //    these from the local filesystem).
+    final netLinkBytes = utf8.encode(netLinkKml);
+    for (int i = 1; i <= _state.screenCount; i++) {
+      await _sftpUpload('$_kmlDir/kml_$i.kml', netLinkBytes);
+      await _sftpUpload('$_kmlDir/slave_$i.kml', netLinkBytes);
+    }
+    await _sftpUpload('$_kmlDir/master.kml', netLinkBytes);
+
+    // 3. Write the sync file that Google Earth's MyPlaces.kml NetworkLink
+    //    actually polls (every 2 s, per setupNetworkLink()).  This MUST
+    //    contain valid KML XML — not a plain URL string — or GE silently
+    //    ignores it and nothing renders on screen.
+    //
+    //    If we have the full KML content, write it directly so GE renders
+    //    it immediately.  Otherwise write the NetworkLink wrapper so GE
+    //    fetches the file from the web server.
+    final syncBytes = (kmlContent != null && kmlContent.isNotEmpty)
+        ? utf8.encode(kmlContent)
+        : netLinkBytes;
+    await _sftpUpload(_kmlSyncFile, syncBytes);
+    for (int i = 1; i <= _state.screenCount; i++) {
+      await _sftpUpload('/var/www/html/kmls_$i.txt', syncBytes);
+    }
+
+    // NOTE: We intentionally do NOT write the KML URL to /tmp/query.txt
+    // here.  The previous code did `echo '$kmlUrl' > /tmp/query.txt` which
+    // raced with flyTo() — the caller typically calls flyTo() right after
+    // sendKml(), which overwrites query.txt with the LookAt command before
+    // GE could read the KML URL.  The NetworkLink/sync approach above is
+    // the reliable delivery mechanism.
 
     _update(_state.copyWith(currentKml: kmlFilename));
   }
@@ -240,15 +250,69 @@ class LgService {
     if (_client == null) return;
     try {
       final logoPng = LGOverlays.createLgLogoPng();
-      final logoB64 = base64Encode(logoPng);
-      await execute("echo '$logoB64' | base64 -d > $_kmlDir/lg_logo.png");
+      await _sftpUpload('$_kmlDir/lg_logo.png', logoPng);
 
       final legendPng = LGOverlays.createLegendPng(category);
-      final legendB64 = base64Encode(legendPng);
-      await execute("echo '$legendB64' | base64 -d > $_kmlDir/legend_$category.png");
+      await _sftpUpload('$_kmlDir/legend_$category.png', legendPng);
 
       await execute("chmod 644 $_kmlDir/*.png 2>/dev/null");
     } catch (_) {}
+  }
+
+  // ─────────────────────────────────────────────
+  // SFTP Upload Helper
+  // ─────────────────────────────────────────────
+
+  /// Uploads [data] to [remotePath] on the connected LG master node via
+  /// SFTP.  Falls back to a chunked shell write if SFTP is unavailable.
+  ///
+  /// This is the correct way to deliver KML/PNG payloads to the rig:
+  ///   • No shell escaping issues (no single-quote / double-quote nesting)
+  ///   • No ARG_MAX limits (data is streamed, not inlined in a command)
+  ///   • No base64 encode/decode overhead on the rig
+  Future<void> _sftpUpload(String remotePath, List<int> data) async {
+    // Preferred path: use the persistent SFTP session
+    if (_sftp != null) {
+      try {
+        final file = await _sftp!.open(
+          remotePath,
+          mode: SftpFileOpenMode.create |
+                SftpFileOpenMode.write |
+                SftpFileOpenMode.truncate,
+        );
+        await file.writeBytes(Uint8List.fromList(data));
+        await file.close();
+        return;
+      } catch (e) {
+        // SFTP write failed — fall through to shell fallback
+        // ignore: avoid_print
+        print('SFTP upload failed for $remotePath: $e — falling back to shell');
+      }
+    }
+
+    // Fallback: write via a heredoc to avoid single-quote escaping issues
+    // and ARG_MAX limits.  We base64-encode and pipe through base64 -d, but
+    // we split the payload into chunks small enough to stay within safe
+    // shell limits and use a heredoc instead of echo to avoid quote issues.
+    final b64 = base64Encode(data);
+    const chunkSize = 65536; // 64 KB chunks (well within ARG_MAX)
+    if (b64.length <= chunkSize) {
+      // Small payload — safe to inline in a single command using heredoc
+      await execute(
+        'base64 -d <<\'KMLEOF\' > $remotePath\n$b64\nKMLEOF',
+      );
+    } else {
+      // Large payload — write in chunks
+      await execute('echo -n "" > $remotePath.b64');
+      for (int offset = 0; offset < b64.length; offset += chunkSize) {
+        final end = (offset + chunkSize).clamp(0, b64.length);
+        final chunk = b64.substring(offset, end);
+        await execute(
+          'cat <<\'KMLEOF\' >> $remotePath.b64\n$chunk\nKMLEOF',
+        );
+      }
+      await execute('base64 -d $remotePath.b64 > $remotePath && rm -f $remotePath.b64');
+    }
   }
 
   String _extractCategoryFromFilename(String filename) {
@@ -287,13 +351,22 @@ class LgService {
   Future<void> clearKml() async {
     if (_client == null) throw Exception('Not connected');
 
-    // Clear KML files and syndication on master
-    await execute("rm -f $_kmlDir/*.kml 2>&1");
-    await execute("echo '' > $_kmlSyncFile 2>&1");
+    // A minimal valid-but-empty KML document.  Writing an empty string or
+    // blank line to the sync file causes Google Earth to reject it as
+    // invalid XML and stop polling, so we use this instead.
+    const emptyKml =
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<kml xmlns="http://www.opengis.net/kml/2.2">'
+        '<Document><name>Empty</name></Document></kml>';
+    final emptyBytes = utf8.encode(emptyKml);
 
-    // Clear all kmls_i.txt files on master
+    // Clear KML files on master
+    await execute("rm -f $_kmlDir/*.kml 2>&1");
+
+    // Write empty-but-valid KML to sync files so GE keeps polling
+    await _sftpUpload(_kmlSyncFile, emptyBytes);
     for (int i = 1; i <= _state.screenCount; i++) {
-      await execute("echo '' > /var/www/html/kmls_$i.txt 2>&1");
+      await _sftpUpload('/var/www/html/kmls_$i.txt', emptyBytes);
     }
 
     // Clear KML files on slave screens
@@ -338,33 +411,53 @@ class LgService {
 
     // 2. Set up Master Node (Screen 1) pointing to http://localhost:$port/kmls.txt
     final masterLinkKml = _buildSyncPlacesKml('http://localhost:$port/kmls.txt');
-    final masterB64 = base64Encode(utf8.encode(masterLinkKml));
+    final masterBytes = utf8.encode(masterLinkKml);
 
     await execute('mkdir -p /home/lg/.googleearth /home/lg/.local/share/Google/GoogleEarth');
-    await execute(
-      "echo '$masterB64' | base64 -d > /home/lg/.googleearth/MyPlaces.kml && "
-      "echo '$masterB64' | base64 -d > /home/lg/.googleearth/myplaces.kml && "
-      "echo '$masterB64' | base64 -d > /home/lg/.local/share/Google/GoogleEarth/MyPlaces.kml && "
-      "echo '$masterB64' | base64 -d > /home/lg/.local/share/Google/GoogleEarth/myplaces.kml"
-    );
+
+    // Use SFTP to write MyPlaces.kml on master — no shell escaping issues
+    for (final path in [
+      '/home/lg/.googleearth/MyPlaces.kml',
+      '/home/lg/.googleearth/myplaces.kml',
+      '/home/lg/.local/share/Google/GoogleEarth/MyPlaces.kml',
+      '/home/lg/.local/share/Google/GoogleEarth/myplaces.kml',
+    ]) {
+      await _sftpUpload(path, masterBytes);
+    }
 
     // 3. Set up Slave Nodes (Screen 2 to screenCount) pointing to http://$ip:$port/kmls.txt
+    //    Strategy: write the slave KML to a temp file on master, then scp it
+    //    to each slave — this avoids all nested quoting issues.
+    final slaveLinkKml = _buildSyncPlacesKml('http://$ip:$port/kmls.txt');
+    final slaveBytes = utf8.encode(slaveLinkKml);
+    const slaveTmp = '/tmp/_cs_slave_myplaces.kml';
+    await _sftpUpload(slaveTmp, slaveBytes);
+
     for (int i = 2; i <= _state.screenCount; i++) {
       try {
-        final slaveLinkKml = _buildSyncPlacesKml('http://$ip:$port/kmls.txt');
-        final slaveB64 = base64Encode(utf8.encode(slaveLinkKml));
+        // Create target directories on slave
+        await execute(
+          'sshpass -p lg ssh -o StrictHostKeyChecking=no lg@lg$i '
+          '"mkdir -p /home/lg/.googleearth /home/lg/.local/share/Google/GoogleEarth"'
+        );
 
-        // Create directories and write both uppercase and lowercase KML files on the slave node
-        final cmd =
-            'sshpass -p lg ssh -o StrictHostKeyChecking=no lg@lg$i '
-            '"mkdir -p /home/lg/.googleearth /home/lg/.local/share/Google/GoogleEarth && '
-            'echo \'$slaveB64\' | base64 -d > /home/lg/.googleearth/MyPlaces.kml && '
-            'echo \'$slaveB64\' | base64 -d > /home/lg/.googleearth/myplaces.kml && '
-            'echo \'$slaveB64\' | base64 -d > /home/lg/.local/share/Google/GoogleEarth/MyPlaces.kml && '
-            'echo \'$slaveB64\' | base64 -d > /home/lg/.local/share/Google/GoogleEarth/myplaces.kml"';
-        await execute(cmd);
+        // Copy the KML file from master to each slave via scp
+        for (final destPath in [
+          '/home/lg/.googleearth/MyPlaces.kml',
+          '/home/lg/.googleearth/myplaces.kml',
+          '/home/lg/.local/share/Google/GoogleEarth/MyPlaces.kml',
+          '/home/lg/.local/share/Google/GoogleEarth/myplaces.kml',
+        ]) {
+          await execute(
+            'sshpass -p lg scp -o StrictHostKeyChecking=no '
+            '$slaveTmp lg@lg$i:$destPath 2>&1'
+          );
+        }
       } catch (_) {}
     }
+
+    // Clean up temp file
+    await execute('rm -f $slaveTmp 2>/dev/null');
 
     // Wait for the files to write completely
     await Future.delayed(const Duration(milliseconds: 300));
@@ -710,7 +803,7 @@ class LgService {
     return LG3DVisuals.build3DMeshAndSpikes(
       centerLat: region.latitude,
       centerLon: region.longitude,
-      spanDeg: 4.5,
+      spanDeg: 1.5,
       category: region.category,
       severityFactor: factor,
       name: '${region.name} 3D Mesh & Hotspot Spikes',
@@ -730,7 +823,7 @@ class LgService {
     };
     final lat = region.latitude;
     final lon = region.longitude;
-    const d = 3.5;
+    const d = 1.0;
     return '''
     <Placemark>
       <name>Extreme Heat Area — ${era.label}</name>
@@ -770,7 +863,7 @@ class LgService {
     };
     final lat = region.latitude;
     final lon = region.longitude;
-    const d = 3.0;
+    const d = 0.8;
     return '''
     <Placemark>
       <name>Glacier extent — ${era.label}</name>
@@ -810,7 +903,7 @@ class LgService {
     };
     final lat = region.latitude;
     final lon = region.longitude;
-    const d = 1.5;
+    const d = 0.4;
     return '''
     <Placemark>
       <name>Sea level inundation — ${era.label}</name>
@@ -850,7 +943,7 @@ class LgService {
     };
     final lat = region.latitude;
     final lon = region.longitude;
-    const d = 4.0;
+    const d = 1.2;
     return '''
     <Placemark>
       <name>Forest cover — ${era.label}</name>
@@ -1013,6 +1106,8 @@ class LgService {
 
   void dispose() {
     _keepaliveTimer?.cancel();
+    _sftp?.close();
+    _sftp = null;
     _stateCtrl.close();
   }
 }
@@ -1062,7 +1157,7 @@ class LG3DVisuals {
 
         final polyColor = _getMeshColorAbgr(category, cellSeverity);
         final wireColor = _getWireframeColorAbgr(category, cellSeverity);
-        final height = 25000.0 + cellSeverity * 350000.0;
+        final height = 8000.0 + cellSeverity * 115000.0;
 
         final hStr = height.toStringAsFixed(1);
         final swStr = '${w.toStringAsFixed(6)},${s.toStringAsFixed(6)},$hStr';
@@ -1117,7 +1212,7 @@ class LG3DVisuals {
       final hsLat = centerLat + hs['dLat']! * spanDeg;
       final hsLon = centerLon + hs['dLon']! * spanDeg;
       final pSpan = cellLonSpan * 0.40;
-      final peakHeight = 140000.0 + severityFactor * hs['scale']! * 380000.0;
+      final peakHeight = 40000.0 + severityFactor * hs['scale']! * 130000.0;
 
       sb.writeln(build3DPyramid(
         centerLat: hsLat,

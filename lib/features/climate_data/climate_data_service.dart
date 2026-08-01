@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math' as math;
 import 'package:http/http.dart' as http;
 import 'package:climate_storyteller/features/climate_data/climate_stats.dart';
 import 'package:climate_storyteller/features/climate_data/aqi_reading.dart';
