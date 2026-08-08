@@ -91,8 +91,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     return Scaffold(
-      backgroundColor: AppColors.bg0,
+      backgroundColor: colors.bg0,
       body: SafeArea(
         child: Column(
           children: [
@@ -200,6 +201,7 @@ class _OnboardPageWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Column(
@@ -210,7 +212,7 @@ class _OnboardPageWidget extends StatelessWidget {
             width: 100,
             height: 100,
             decoration: BoxDecoration(
-              color: AppColors.bg2,
+              color: colors.bg2,
               borderRadius: BorderRadius.circular(24),
               border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
               boxShadow: [
@@ -227,14 +229,14 @@ class _OnboardPageWidget extends StatelessWidget {
 
           Text(
             page.title,
-            style: AppTypography.heading1.copyWith(fontSize: 30),
+            style: AppTypography.heading1.copyWith(fontSize: 30, color: colors.textPrimary),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 16),
           Text(
             page.subtitle,
             style: AppTypography.bodyLarge.copyWith(
-              color: AppColors.textSecondary,
+              color: colors.textSecondary,
               height: 1.6,
             ),
             textAlign: TextAlign.center,
@@ -247,9 +249,9 @@ class _OnboardPageWidget extends StatelessWidget {
                 margin: const EdgeInsets.only(bottom: 10),
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: AppColors.bg2,
+                  color: colors.bg2,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFF1E2235)),
+                  border: Border.all(color: colors.cardBorder),
                 ),
                 child: Row(
                   children: [
@@ -267,8 +269,8 @@ class _OnboardPageWidget extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(f.title, style: AppTypography.bodyLarge),
-                          Text(f.subtitle, style: AppTypography.bodySmall),
+                          Text(f.title, style: AppTypography.bodyLarge.copyWith(color: colors.textPrimary)),
+                          Text(f.subtitle, style: AppTypography.bodySmall.copyWith(color: colors.textSecondary)),
                         ],
                       ),
                     ),

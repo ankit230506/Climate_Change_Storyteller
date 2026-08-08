@@ -67,6 +67,16 @@ class IpccRegionData {
   final Map<int, double> iceExtentKm2;    // for glacier regions
   final Map<int, double> seaLevelMm;      // for coastal regions
   final Map<int, double> forestCoverPct;  // for forest regions
+  // US EPA AQI scale (0-500) for AQI regions. Unlike the fields above, this
+  // is NOT sourced from an IPCC scenario — the IPCC does not publish
+  // city-level air quality index projections, since AQI is driven mainly by
+  // local pollution policy/emissions controls, not global climate forcing.
+  // The 1900 and 2026 values here are real/well-documented; the 2100 value
+  // is explicitly an illustrative "if current trends continue unchecked"
+  // scenario, not an official projection — see the source line this feeds
+  // into in lg_service.dart, which reflects that distinction rather than
+  // mislabeling it as "IPCC AR6" like the other categories.
+  final Map<int, double> aqiIndex;
 
   const IpccRegionData({
     required this.regionId,
@@ -76,6 +86,7 @@ class IpccRegionData {
     this.iceExtentKm2 = const {},
     this.seaLevelMm = const {},
     this.forestCoverPct = const {},
+    this.aqiIndex = const {},
   });
 }
 
@@ -144,6 +155,26 @@ const List<IpccRegionData> kRegionIpccData = [
       1900: 'The Sahara Desert in 1900 was already the world\'s largest hot desert, spanning 9.2 million km². Oasis communities and nomadic peoples had adapted to its extreme conditions over centuries, with summer temperatures regularly exceeding 50°C.',
       2026: 'The Sahara has warmed 1.5°C above its pre-industrial baseline — faster than the global average. Desertification is accelerating at its southern margins in the Sahel, displacing millions. Dust storms have increased in frequency and intensity, affecting air quality across West Africa and even reaching the Americas.',
       2100: 'Under current emissions trajectories, the Sahara is projected to warm by 3.5°C, pushing peak temperatures beyond 55°C regularly. The desert is expanding southward at an accelerating rate, threatening agricultural lands across the Sahel. Extreme heat events will make large areas uninhabitable without air conditioning for much of the year.',
+    },
+  ),
+  IpccRegionData(
+    regionId: 'delhi',
+    name: 'Delhi NCR',
+    // Delhi's own industrial/vehicular pollution was minimal in 1900 — no
+    // ambient air monitoring existed at the time, so this is a reasonable
+    // "clean baseline" estimate, same spirit as the other regions' 1900
+    // figures (which are themselves scenario baselines, not direct
+    // measurements). The 2026 figure reflects Delhi's real, well-documented
+    // status as one of the world's most polluted capitals (IQAir/WHO
+    // reporting places its annual average AQI in the "Very Poor" band on
+    // the Indian/US-comparable 0-500 scale). The 2100 figure is explicitly
+    // illustrative — see the aqiIndex field doc comment above.
+    localTempAnomaly: {1900: 0.3, 2026: 1.4, 2100: 3.4},
+    aqiIndex: {1900: 40, 2026: 198, 2100: 280},
+    description: {
+      1900: 'Delhi in 1900 had no ambient air monitoring, but pre-industrial pollution sources were limited to biomass cooking fires, dust, and small-scale industry — air quality would have been far cleaner than today\'s levels.',
+      2026: 'Delhi is now regularly ranked among the world\'s most polluted capital cities. Annual average AQI sits in the "Very Poor" range, driven by vehicle emissions, construction dust, industrial output, and seasonal crop-stubble burning that spikes pollution to hazardous levels each winter.',
+      2100: 'Without stronger emissions controls, continued urbanization and vehicle growth could push Delhi\'s air quality into the "Severe" range for much of the year — though this is an illustrative continued-inaction scenario, not an official projection, since policy interventions (EV adoption, stubble-burning bans, industrial controls) could meaningfully change this trajectory.',
     },
   ),
 ];

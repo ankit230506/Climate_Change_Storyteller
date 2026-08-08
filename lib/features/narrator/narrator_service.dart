@@ -235,7 +235,7 @@ IMPORTANT: The narration MUST be written entirely in $langName. Under no circums
         if (currentChunk.isEmpty) {
           currentChunk = sentence;
         } else {
-          currentChunk += ' ' + sentence;
+          currentChunk += ' $sentence';
         }
       }
     }

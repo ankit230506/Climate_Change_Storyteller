@@ -80,8 +80,9 @@ class _ExploreScreenState extends State<ExploreScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     return Scaffold(
-      backgroundColor: AppColors.bg0,
+      backgroundColor: colors.bg0,
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -92,9 +93,9 @@ class _ExploreScreenState extends State<ExploreScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Explore', style: AppTypography.heading1),
+                  Text('Explore', style: AppTypography.heading1.copyWith(color: colors.textPrimary)),
                   Text('Select a climate region to begin',
-                      style: AppTypography.bodySmall),
+                      style: AppTypography.bodySmall.copyWith(color: colors.textSecondary)),
                 ],
               ),
             ),
@@ -121,20 +122,20 @@ class _ExploreScreenState extends State<ExploreScreen> {
                       decoration: BoxDecoration(
                         color: active
                             ? AppColors.primary.withValues(alpha: 0.15)
-                            : AppColors.bg3,
+                            : colors.bg3,
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
                             color: active
                                 ? AppColors.primary
-                                : const Color(0xFF252840)),
+                                : colors.cardBorder),
                       ),
                       child: Text(cat, style: TextStyle(
                         fontSize: 13,
                         fontWeight: active
-                            ? FontWeight.w700 : FontWeight.w400,
+                            ? FontWeight.w700 : FontWeight.w500,
                         color: active
                             ? AppColors.primary
-                            : AppColors.textSecondary,
+                            : colors.textSecondary,
                       )),
                     ),
                   );
@@ -199,10 +200,10 @@ class _ExploreScreenState extends State<ExploreScreen> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Wrap(spacing: 14, runSpacing: 6, children: [
-                _dot(AppColors.glacier, 'Glaciers'),
-                _dot(AppColors.forest,  'Forests'),
-                _dot(AppColors.seaLevel,'Sea Rise'),
-                _dot(AppColors.warning, 'Heat'),
+                _dot(AppColors.glacier, 'Glaciers', colors),
+                _dot(AppColors.forest,  'Forests', colors),
+                _dot(AppColors.seaLevel,'Sea Rise', colors),
+                _dot(AppColors.warning, 'Heat', colors),
               ]),
             ),
             const SizedBox(height: 12),
@@ -215,7 +216,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('REGIONS', style: AppTypography.label),
+                    Text('REGIONS', style: AppTypography.label.copyWith(color: colors.textMuted)),
                     const SizedBox(height: 10),
                     ..._filtered.map((r) {
                       final selected = _selected?.id == r.id;
@@ -229,12 +230,12 @@ class _ExploreScreenState extends State<ExploreScreen> {
                           decoration: BoxDecoration(
                             color: selected
                                 ? color.withValues(alpha: 0.08)
-                                : AppColors.bg2,
+                                : colors.bg2,
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
                               color: selected
                                   ? color.withValues(alpha: 0.5)
-                                  : const Color(0xFF1E2235),
+                                  : colors.cardBorder,
                               width: selected ? 1.5 : 1,
                             ),
                           ),
@@ -252,15 +253,15 @@ class _ExploreScreenState extends State<ExploreScreen> {
                             Expanded(child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(r.name, style: const TextStyle(
+                                Text(r.name, style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w600,
-                                  color: AppColors.textPrimary,
+                                  color: colors.textPrimary,
                                 )),
                                 Text(
                                   '${r.latitude.toStringAsFixed(1)}°, '
                                   '${r.longitude.toStringAsFixed(1)}°',
-                                  style: AppTypography.bodySmall),
+                                  style: AppTypography.bodySmall.copyWith(color: colors.textSecondary)),
                               ],
                             )),
                             if (r.riskLevel != null)
@@ -289,7 +290,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                       ? () => _flyToLG(_selected!)
                       : null,
                   icon: const Icon(Icons.public,
-                      size: 18, color: AppColors.bg0),
+                      size: 18, color: Colors.white),
                   label: Text(_selected != null
                       ? 'Fly to ${_selected!.name} on LG'
                       : 'Select a Region Above'),
@@ -302,13 +303,13 @@ class _ExploreScreenState extends State<ExploreScreen> {
     );
   }
 
-  Widget _dot(Color c, String label) => Row(
+  Widget _dot(Color c, String label, AppColorScheme colors) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
       Container(width: 8, height: 8,
           decoration: BoxDecoration(shape: BoxShape.circle, color: c)),
       const SizedBox(width: 4),
-      Text(label, style: AppTypography.caption.copyWith(letterSpacing: 0.3)),
+      Text(label, style: AppTypography.caption.copyWith(letterSpacing: 0.3, color: colors.textSecondary)),
     ],
   );
 }

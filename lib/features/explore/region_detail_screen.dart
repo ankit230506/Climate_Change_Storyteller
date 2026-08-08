@@ -237,6 +237,7 @@ class _KmlLayerTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     final pill = switch (status) {
       _LayerStatus.loaded  => StatusPill.loaded(),
       _LayerStatus.ready   => StatusPill.ready(),
@@ -252,26 +253,26 @@ class _KmlLayerTile extends StatelessWidget {
         decoration: BoxDecoration(
           color: status == _LayerStatus.loaded
               ? AppColors.good.withValues(alpha: 0.05)
-              : AppColors.bg2,
+              : colors.bg2,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: status == _LayerStatus.loaded
                 ? AppColors.good.withValues(alpha: 0.3)
-                : const Color(0xFF1E2235),
+                : colors.cardBorder,
           ),
         ),
         child: Row(
           children: [
-            Icon(layer.icon, color: AppColors.textSecondary, size: 22),
+            Icon(layer.icon, color: colors.textSecondary, size: 22),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(layer.name, style: AppTypography.bodyLarge),
+                  Text(layer.name, style: AppTypography.bodyLarge.copyWith(color: colors.textPrimary)),
                   Text(
                     'Tap to load on LG',
-                    style: AppTypography.caption,
+                    style: AppTypography.caption.copyWith(color: colors.textSecondary),
                   ),
                 ],
               ),

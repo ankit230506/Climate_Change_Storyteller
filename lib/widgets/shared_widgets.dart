@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:climate_storyteller/core/constant/app_theme.dart';
+import 'package:climate_storyteller/core/di/injection_container.dart';
 import 'package:climate_storyteller/features/explore/climate_era.dart';
 import 'package:climate_storyteller/features/lg_connection/lg_rig_state.dart';
 
@@ -15,11 +16,12 @@ class SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
         children: [
-          Text(title.toUpperCase(), style: AppTypography.label),
+          Text(title.toUpperCase(), style: AppTypography.label.copyWith(color: colors.textSecondary)),
           if (trailing != null) ...[
             const Spacer(),
             trailing!,
@@ -89,12 +91,13 @@ class LGStatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     final isConnected = rigState.isConnected;
     final dotColor = switch (rigState.status) {
       LGConnectionStatus.connected => AppColors.good,
       LGConnectionStatus.connecting => AppColors.warning,
       LGConnectionStatus.error => AppColors.critical,
-      LGConnectionStatus.disconnected => AppColors.textMuted,
+      LGConnectionStatus.disconnected => colors.textMuted,
     };
 
     return GestureDetector(
@@ -102,12 +105,12 @@ class LGStatusCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: AppColors.bg2,
+          color: colors.bg2,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isConnected
                 ? AppColors.primary.withValues(alpha: 0.3)
-                : const Color(0xFF1E2235),
+                : colors.cardBorder,
           ),
         ),
         child: Row(
@@ -121,7 +124,7 @@ class LGStatusCard extends StatelessWidget {
                   Text(
                     isConnected ? 'LG Rig · Connected (port: ${rigState.webPort})' : 'LG Rig · Disconnected',
                     style: AppTypography.bodySmall.copyWith(
-                      color: AppColors.textPrimary,
+                      color: colors.textPrimary,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -129,7 +132,7 @@ class LGStatusCard extends StatelessWidget {
                     Text(
                       rigState.currentKml!,
                       style: AppTypography.caption.copyWith(
-                        color: AppColors.textMuted,
+                        color: colors.textMuted,
                         letterSpacing: 0,
                       ),
                       overflow: TextOverflow.ellipsis,
@@ -137,15 +140,101 @@ class LGStatusCard extends StatelessWidget {
                 ],
               ),
             ),
-            if (isConnected && rigState.latencyMs != null)
-              Text(
-                '${rigState.latencyMs}ms',
-                style: AppTypography.caption.copyWith(color: AppColors.good),
-              ),
+            if (isConnected) ...[
+              if (rigState.latencyMs != null) ...[
+                Text(
+                  '${rigState.latencyMs}ms',
+                  style: AppTypography.caption.copyWith(color: AppColors.good),
+                ),
+                const SizedBox(width: 8),
+              ],
+              const _ClearKmlIconButton(),
+            ],
           ],
         ),
       ),
     );
+  }
+}
+
+class _ClearKmlIconButton extends StatefulWidget {
+  const _ClearKmlIconButton();
+
+  @override
+  State<_ClearKmlIconButton> createState() => _ClearKmlIconButtonState();
+}
+
+class _ClearKmlIconButtonState extends State<_ClearKmlIconButton> {
+  bool _clearing = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Remove all KMLs from LG',
+      child: InkWell(
+        onTap: _clearing ? null : _clearKmls,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            color: AppColors.critical.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.critical.withValues(alpha: 0.4)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_clearing)
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.critical,
+                  ),
+                )
+              else
+                const Icon(Icons.delete_sweep, color: AppColors.critical, size: 16),
+              const SizedBox(width: 4),
+              const Text(
+                'Clear KML',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.critical,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _clearKmls() async {
+    setState(() => _clearing = true);
+    try {
+      await DI.lgService.clearKml();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Row(children: [
+            Icon(Icons.check_circle, color: Colors.white, size: 18),
+            SizedBox(width: 8),
+            Text('All KMLs removed from Liquid Galaxy in one go!'),
+          ]),
+          backgroundColor: AppColors.good,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Failed to remove KMLs: $e'),
+          backgroundColor: AppColors.critical,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _clearing = false);
+    }
   }
 }
 
@@ -230,6 +319,7 @@ class EraChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
@@ -237,10 +327,10 @@ class EraChip extends StatelessWidget {
         curve: Curves.easeOut,
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         decoration: BoxDecoration(
-          color: isSelected ? AppColors.primary.withValues(alpha: 0.15) : AppColors.bg3,
+          color: isSelected ? AppColors.primary.withValues(alpha: 0.15) : colors.bg3,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: isSelected ? AppColors.primary : const Color(0xFF252840),
+            color: isSelected ? AppColors.primary : colors.cardBorder,
             width: isSelected ? 1.5 : 1,
           ),
         ),
@@ -249,7 +339,7 @@ class EraChip extends StatelessWidget {
           style: TextStyle(
             fontSize: 15,
             fontWeight: isSelected ? FontWeight.w700 : FontWeight.w400,
-            color: isSelected ? AppColors.primary : AppColors.textSecondary,
+            color: isSelected ? AppColors.primary : colors.textSecondary,
             letterSpacing: isSelected ? -0.2 : 0,
           ),
         ),
@@ -276,6 +366,7 @@ class CategoryFilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     return SizedBox(
       height: 36,
       child: ListView.separated(
@@ -291,10 +382,10 @@ class CategoryFilterBar extends StatelessWidget {
               duration: const Duration(milliseconds: 180),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
               decoration: BoxDecoration(
-                color: active ? AppColors.primary.withValues(alpha: 0.15) : AppColors.bg3,
+                color: active ? AppColors.primary.withValues(alpha: 0.15) : colors.bg3,
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                  color: active ? AppColors.primary : const Color(0xFF252840),
+                  color: active ? AppColors.primary : colors.cardBorder,
                 ),
               ),
               child: Text(
@@ -302,7 +393,7 @@ class CategoryFilterBar extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: active ? FontWeight.w600 : FontWeight.w400,
-                  color: active ? AppColors.primary : AppColors.textSecondary,
+                  color: active ? AppColors.primary : colors.textSecondary,
                 ),
               ),
             ),
@@ -333,6 +424,7 @@ class CTAButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     if (isSecondary) {
       return OutlinedButton.icon(
         onPressed: onPressed,
@@ -343,7 +435,7 @@ class CTAButton extends StatelessWidget {
     return ElevatedButton.icon(
       onPressed: onPressed,
       icon: icon != null
-          ? Icon(icon, size: 18, color: AppColors.bg0)
+          ? Icon(icon, size: 18, color: colors.bg0)
           : const SizedBox.shrink(),
       label: Text(label),
     );
@@ -370,17 +462,18 @@ class StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.bg2,
+        color: colors.bg2,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF1E2235)),
+        border: Border.all(color: colors.cardBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: AppTypography.caption),
+          Text(label, style: AppTypography.caption.copyWith(color: colors.textMuted)),
           const SizedBox(height: 6),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
@@ -389,14 +482,14 @@ class StatCard extends StatelessWidget {
                 value,
                 style: AppTypography.dataValue.copyWith(
                   fontSize: 22,
-                  color: valueColor ?? AppColors.textPrimary,
+                  color: valueColor ?? colors.textPrimary,
                 ),
               ),
               if (unit != null) ...[
                 const SizedBox(width: 4),
                 Padding(
                   padding: const EdgeInsets.only(bottom: 3),
-                  child: Text(unit!, style: AppTypography.caption),
+                  child: Text(unit!, style: AppTypography.caption.copyWith(color: colors.textMuted)),
                 ),
               ],
             ],

@@ -21,12 +21,19 @@ class SecureStorageService {
   static const _kLgScreen  =  'lg_screen';
   static const _kLgWebPort =  'lg_web_port';
   static const _kLanguageCode = 'app_language_code';
+  static const _kThemeMode    = 'app_theme_mode';
 
   // ── Language Settings ───────────────────────────────────────────────────
   Future<void> saveLanguageCode(String code) =>
       _storage.write(key: _kLanguageCode, value: code);
 
   Future<String?> getLanguageCode() => _storage.read(key: _kLanguageCode);
+
+  // ── Theme Settings ──────────────────────────────────────────────────────
+  Future<void> saveThemeMode(String mode) =>
+      _storage.write(key: _kThemeMode, value: mode);
+
+  Future<String?> getThemeMode() => _storage.read(key: _kThemeMode);
 
   // ── Gemini API key (required) ────────────────────────────────────────────
   Future<void> saveGeminiKey(String key) =>

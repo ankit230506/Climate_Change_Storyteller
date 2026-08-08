@@ -1,13 +1,12 @@
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:climate_storyteller/core/constant/app_theme.dart';
 import 'package:climate_storyteller/core/di/injection_container.dart';
-import 'package:climate_storyteller/widgets/shared_widgets.dart';
-import 'package:climate_storyteller/features/lg_connection/lg_rig_state.dart';
-import 'climate_region.dart';
-import 'climate_era.dart';
+import 'package:climate_storyteller/features/explore/climate_era.dart';
+import 'package:climate_storyteller/features/explore/climate_region.dart';
 import 'package:climate_storyteller/features/climate_data/climate_stats.dart';
+import 'package:climate_storyteller/features/lg_connection/lg_rig_state.dart';
+import 'package:climate_storyteller/widgets/shared_widgets.dart';
 
 class TimelineScreen extends StatefulWidget {
   const TimelineScreen({super.key});
@@ -16,12 +15,13 @@ class TimelineScreen extends StatefulWidget {
 }
 
 class _TimelineScreenState extends State<TimelineScreen> {
-  ClimateRegion _region   = kDefaultRegions.first;
-  ClimateEra    _era      = ClimateEra.present2026;
-  bool          _loading  = false;
-  bool          _statsLoading = false;
+  ClimateEra    _era    = ClimateEra.present2026;
+  ClimateRegion _region = kDefaultRegions.first;
+  bool          _loading = false;
   String?       _statusMsg;
+
   ClimateStats? _stats;
+  bool _statsLoading = false;
 
   @override
   void initState() {
@@ -53,16 +53,17 @@ class _TimelineScreenState extends State<TimelineScreen> {
     }
     setState(() { _loading = true; _statusMsg = 'Building KML…'; });
     try {
+      final filename = 'timeline_${_region.id}_${_era.name}.kml';
       setState(() => _statusMsg = 'Fetching NASA GIBS data…');
       final kmlPath = await DI.lgService.buildKml(
         region: _region, era: _era);
+      // buildKml() returns a local FILE PATH (it caches the generated KML
+      // on disk), not the KML text itself. Passing the path straight into
+      // sendKml's kmlContent would upload the literal path string to the
+      // rig instead of actual XML — read the file to get the real content.
+      final kmlContent = await File(kmlPath).readAsString();
 
       setState(() => _statusMsg = 'Uploading to rig…');
-      String kmlContent = '';
-      if (!kIsWeb) {
-        kmlContent = await File(kmlPath).readAsString();
-      }
-      final filename   = '${_region.id}_${_era.label}.kml';
       await DI.lgService.sendKml(filename, kmlContent: kmlContent);
 
       setState(() => _statusMsg = 'Flying to ${_region.name}…');
@@ -73,33 +74,155 @@ class _TimelineScreenState extends State<TimelineScreen> {
       );
 
       if (mounted) {
-        setState(() => _statusMsg = null);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Row(children: [
-            const Icon(Icons.check_circle, color: Colors.white, size: 18),
-            const SizedBox(width: 8),
-            Text('${_region.name} ${_era.label} loaded on LG!'),
-          ]),
+          content: Text('Loaded ${_region.name} (${_era.label}) on LG rig!'),
           backgroundColor: AppColors.primary,
         ));
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _statusMsg = null);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('Error: $e'),
           backgroundColor: AppColors.critical,
         ));
       }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() { _loading = false; _statusMsg = null; });
+    }
+  }
+
+  Future<void> _clearKmlFromLG() async {
+    final lg = DI.lgService;
+    if (!lg.state.isConnected) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Not connected — go to Settings → Connect to LG Rig'),
+        backgroundColor: AppColors.bg2,
+      ));
+      return;
+    }
+    setState(() { _loading = true; _statusMsg = 'Clearing KMLs…'; });
+    try {
+      await DI.lgService.clearKml();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Cleared all KMLs from LG rig.'),
+          backgroundColor: AppColors.good,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error clearing KMLs: $e'),
+          backgroundColor: AppColors.critical,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() { _loading = false; _statusMsg = null; });
+    }
+  }
+
+  Future<void> _verifyKmlPipeline(BuildContext context) async {
+    final colors = AppColors.of(context);
+    final lg = DI.lgService;
+    if (!lg.state.isConnected) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Not connected — connect to LG Rig first in Settings'),
+        backgroundColor: AppColors.bg2,
+      ));
+      return;
+    }
+
+    setState(() { _loading = true; _statusMsg = 'Running diagnostics…'; });
+
+    try {
+      final kmlPath = await DI.lgService.buildKml(region: _region, era: _era);
+      // Same fix as _sendKmlToLG(): buildKml() returns a path, not content.
+      // Reading the file here also makes the byte-count diagnostic below
+      // accurate — previously it reported the length of the path string.
+      final kmlContent = await File(kmlPath).readAsString();
+      final looksValid = kmlContent.trim().startsWith('<?xml') ||
+          kmlContent.trim().startsWith('<kml');
+
+      final results = <String, String>{
+        'kml_build': looksValid
+            ? 'Generated valid-looking KML (${kmlContent.length} bytes) at:\n$kmlPath'
+            : '⚠️ Content does NOT look like KML (${kmlContent.length} bytes) — check buildKml()/_generateKml()',
+        'lg_connection': 'Connected to LG rig and ready for delivery.',
+        'send_ready': 'KML pipeline is available for upload.',
+      };
+
+      if (!context.mounted) return;
+      setState(() { _loading = false; _statusMsg = null; });
+
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: colors.bg1,
+          title: const Text('KML Pipeline Diagnostic',
+              style: TextStyle(color: AppColors.accent, fontSize: 16)),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: results.entries.map((e) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(e.key.replaceAll('_', ' ').toUpperCase(),
+                          style: const TextStyle(
+                              color: AppColors.accent,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 11)),
+                      const SizedBox(height: 4),
+                      Text(e.value,
+                          style: TextStyle(
+                              color: colors.textSecondary,
+                              fontSize: 13,
+                              fontFamily: 'monospace')),
+                    ],
+                  ),
+                )).toList(),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close', style: TextStyle(color: AppColors.primary)),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      setState(() { _loading = false; _statusMsg = null; });
+
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: colors.bg1,
+          title: const Text('Diagnostic Result',
+              style: TextStyle(color: AppColors.critical, fontSize: 16)),
+          content: Text(e.toString(), style: TextStyle(color: colors.textPrimary)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close', style: TextStyle(color: AppColors.primary)),
+            ),
+          ],
+        ),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     return Scaffold(
-      backgroundColor: AppColors.bg0,
+      backgroundColor: colors.bg0,
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
@@ -109,9 +232,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
               const SizedBox(height: 4),
 
               // ── Header ──────────────────────────────────────────────────
-              Text(_region.name, style: AppTypography.heading1),
+              Text(_region.name, style: AppTypography.heading1.copyWith(color: colors.textPrimary)),
               Text('Slide to travel through time',
-                  style: AppTypography.bodySmall),
+                  style: AppTypography.bodySmall.copyWith(color: colors.textSecondary)),
               const SizedBox(height: 24),
 
               // ── Era slider ───────────────────────────────────────────────
@@ -142,18 +265,18 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   child: Text(
                     _era.label,
                     key: ValueKey(_era),
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 80,
                       fontWeight: FontWeight.w800,
                       letterSpacing: -3,
-                      color: AppColors.textPrimary,
+                      color: colors.textPrimary,
                     ),
                   ),
                 ),
               ),
               Center(child: Text(
                 _eraSource(_era),
-                style: AppTypography.bodySmall,
+                style: AppTypography.bodySmall.copyWith(color: colors.textSecondary),
               )),
               const SizedBox(height: 24),
 
@@ -203,7 +326,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 Text(
                   'Source: ${_stats!.source}',
                   style: AppTypography.caption.copyWith(
-                      color: AppColors.textMuted),
+                      color: colors.textMuted),
                 ),
               ],
               const SizedBox(height: 24),
@@ -226,12 +349,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
                         decoration: BoxDecoration(
                           color: active
                               ? AppColors.primary.withValues(alpha: 0.15)
-                              : AppColors.bg3,
+                              : colors.bg3,
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
                             color: active
                                 ? AppColors.primary
-                                : const Color(0xFF252840),
+                                : colors.cardBorder,
                           ),
                         ),
                         child: Text(
@@ -239,10 +362,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: active
-                                ? FontWeight.w700 : FontWeight.w400,
+                                ? FontWeight.w700 : FontWeight.w500,
                             color: active
                                 ? AppColors.primary
-                                : AppColors.textSecondary,
+                                : colors.textSecondary,
                           ),
                         ),
                       ),
@@ -300,11 +423,37 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 icon: _loading
                     ? const SizedBox(width: 18, height: 18,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: AppColors.bg0))
-                    : const Icon(Icons.send, size: 18, color: AppColors.bg0),
+                            strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.send, size: 18, color: Colors.white),
                 label: Text(_loading ? 'Sending…' : 'Send KML to LG'),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 8),
+
+              // ── Remove KML button ─────────────────────────────────────────
+              OutlinedButton.icon(
+                onPressed: _loading ? null : _clearKmlFromLG,
+                icon: const Icon(Icons.delete_sweep, size: 18, color: AppColors.critical),
+                label: const Text('🗑️ Remove All KMLs from LG'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.critical,
+                  side: const BorderSide(color: AppColors.critical),
+                  minimumSize: const Size(double.infinity, 44),
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              // ── Verify KML pipeline diagnostic ────────────────────────────
+              OutlinedButton.icon(
+                onPressed: _loading ? null : () => _verifyKmlPipeline(context),
+                icon: const Icon(Icons.bug_report, size: 18, color: AppColors.accent),
+                label: const Text('🔍 Verify KML Pipeline'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.accent,
+                  side: const BorderSide(color: AppColors.accent),
+                  minimumSize: const Size(double.infinity, 44),
+                ),
+              ),
+              const SizedBox(height: 24),
             ],
           ),
         ),
@@ -326,6 +475,7 @@ class _EraSlider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     final index = ClimateEra.values.indexOf(selected).toDouble();
     return Column(children: [
       Row(
@@ -334,9 +484,9 @@ class _EraSlider extends StatelessWidget {
           e.label,
           style: TextStyle(
             fontSize: 14,
-            fontWeight: e == selected ? FontWeight.w700 : FontWeight.w400,
+            fontWeight: e == selected ? FontWeight.w700 : FontWeight.w500,
             color: e == selected
-                ? AppColors.primary : AppColors.textSecondary,
+                ? AppColors.primary : colors.textSecondary,
           ),
         )).toList(),
       ),
@@ -346,7 +496,7 @@ class _EraSlider extends StatelessWidget {
       Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: ClimateEra.values.map((e) => Text(
-          e.subtitle, style: AppTypography.caption)).toList(),
+          e.subtitle, style: AppTypography.caption.copyWith(color: colors.textMuted))).toList(),
       ),
     ]);
   }
@@ -362,12 +512,13 @@ class _StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.bg2,
+        color: colors.bg2,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF1E2235)),
+        border: Border.all(color: colors.cardBorder),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
@@ -380,7 +531,7 @@ class _StatCard extends StatelessWidget {
         Text(value, style: TextStyle(
           fontSize: 20,
           fontWeight: FontWeight.w700,
-          color: AppColors.textPrimary,
+          color: colors.textPrimary,
           letterSpacing: -0.5,
         )),
       ]),
@@ -397,6 +548,7 @@ class _EraCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
@@ -405,32 +557,32 @@ class _EraCard extends StatelessWidget {
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: isActive
-              ? AppColors.primary.withValues(alpha: 0.08) : AppColors.bg2,
+              ? AppColors.primary.withValues(alpha: 0.08) : colors.bg2,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: isActive
                 ? AppColors.primary.withValues(alpha: 0.4)
-                : const Color(0xFF1E2235),
+                : colors.cardBorder,
           ),
         ),
         child: Row(children: [
           Icon(_icon(era),
               color: isActive
-                  ? AppColors.primary : AppColors.textSecondary,
+                  ? AppColors.primary : colors.textSecondary,
               size: 22),
           const SizedBox(width: 14),
           Expanded(child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(era.label, style: AppTypography.heading3),
-              Text(_desc(era), style: AppTypography.bodySmall),
+              Text(era.label, style: AppTypography.heading3.copyWith(color: colors.textPrimary)),
+              Text(_desc(era), style: AppTypography.bodySmall.copyWith(color: colors.textSecondary)),
             ],
           )),
           if (isActive)
             StatusPill.active()
           else
-            const Icon(Icons.chevron_right,
-                color: AppColors.textMuted, size: 20),
+            Icon(Icons.chevron_right,
+                color: colors.textMuted, size: 20),
         ]),
       ),
     );

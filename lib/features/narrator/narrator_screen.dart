@@ -56,12 +56,14 @@ class _NarratorScreenState extends State<NarratorScreen>
 
   void _setupAudioListeners() {
     _player.onPositionChanged.listen((pos) {
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _position = pos;
         _progress = _total.inMilliseconds > 0
             ? pos.inMilliseconds / _total.inMilliseconds
             : 0;
       });
+      }
     });
 
     _player.onDurationChanged.listen((dur) {
@@ -188,8 +190,9 @@ class _NarratorScreenState extends State<NarratorScreen>
       stream: DI.languageService.languageStream,
       initialData: DI.languageService.currentLanguage,
       builder: (context, langSnap) {
+        final colors = AppColors.of(context);
         return Scaffold(
-          backgroundColor: AppColors.bg0,
+          backgroundColor: colors.bg0,
           body: SafeArea(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(20),
@@ -235,13 +238,13 @@ class _NarratorScreenState extends State<NarratorScreen>
                     ),
 
                   // ── Playback card ────────────────────────────────────────────
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: AppColors.bg2,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: const Color(0xFF1E2235)),
-                    ),
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: colors.bg2,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: colors.cardBorder),
+                      ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -393,15 +396,15 @@ class _NarratorScreenState extends State<NarratorScreen>
                     Container(
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: AppColors.bg2,
+                        color: colors.bg2,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFF1E2235)),
+                        border: Border.all(color: colors.cardBorder),
                       ),
                       child: Text(
                         _narrationText!,
                         style: AppTypography.bodySmall.copyWith(
                           height: 1.7,
-                          color: AppColors.textSecondary,
+                          color: colors.textSecondary,
                         ),
                       ),
                     ),

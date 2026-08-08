@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:http/http.dart' as http;
 import 'package:climate_storyteller/features/climate_data/climate_stats.dart';
 import 'package:climate_storyteller/features/climate_data/aqi_reading.dart';
@@ -215,10 +216,50 @@ class ClimateDataService {
     for (final r in readings) {
       if (r.parameter == 'pm25') pm25 = r.value;
     }
-    final severityFactor = (pm25 / 180.0).clamp(0.12, 0.95);
+    
+    // Scale the rings based on PM2.5 severity
+    final severityScale = (pm25 / 100.0).clamp(0.5, 2.0);
+    final baseRadius = 0.05 * severityScale; // ~5km base radius
 
-    final host = lgService.state.ipAddress ?? 'localhost';
-    final port = lgService.state.webPort;
+    // 5 concentric rings (Good -> Hazardous)
+    final rings = StringBuffer();
+    final colors = [
+      '8833cc44', // Good (Green)
+      '8855ddaa', // Moderate (Yellow)
+      '880088ff', // Unhealthy (Orange)
+      '880000ff', // Very Unhealthy (Red)
+      '88990099', // Hazardous (Purple)
+    ];
+    
+    for (int i = 0; i < 5; i++) {
+      final radius = baseRadius * (5 - i); // Largest first
+      final color = colors[i];
+      final points = <String>[];
+      for (int a = 0; a <= 32; a++) {
+        final angle = a * (3.14159 * 2) / 32;
+        final pLat = lat + radius * math.sin(angle);
+        // adjust longitude based on latitude to keep roughly circular
+        final pLon = lon + radius * math.cos(angle) / math.cos(lat * 3.14159 / 180);
+        points.add('${pLon.toStringAsFixed(5)},${pLat.toStringAsFixed(5)},0');
+      }
+      
+      rings.writeln('''
+      <Placemark>
+        <name>AQI Zone ${5-i}</name>
+        <Style>
+          <PolyStyle><color>$color</color></PolyStyle>
+          <LineStyle><color>00000000</color><width>0</width></LineStyle>
+        </Style>
+        <Polygon>
+          <tessellate>1</tessellate>
+          <outerBoundaryIs><LinearRing><coordinates>
+            ${points.join(' ')}
+          </coordinates></LinearRing></outerBoundaryIs>
+        </Polygon>
+      </Placemark>''');
+    }
+
+    final projectedPm25 = pm25 * 1.5; // simple projection for demo
 
     return '''<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2"
@@ -233,50 +274,42 @@ class ClimateDataService {
       <altitude>0</altitude>
       <heading>30</heading>
       <tilt>60</tilt>
-      <range>450000</range>
+      <range>80000</range>
       <altitudeMode>relativeToGround</altitudeMode>
     </LookAt>
+    
+    <Style id="customBalloon">
+      <BalloonStyle>
+        <text><![CDATA[
+          <font face="Helvetica, Arial, sans-serif">
+            <h3>\$[name]</h3>
+            \$[description]
+          </font>
+        ]]></text>
+      </BalloonStyle>
+    </Style>
 
-    <!-- Screen 1 Overlay: Liquid Galaxy Logo -->
-    <ScreenOverlay>
-      <name>Liquid Galaxy Logo</name>
-      <Icon>
-        <href>http://$host:$port/kml/lg_logo.png</href>
-      </Icon>
-      <overlayXY x="0" y="1" xunits="fraction" yunits="fraction"/>
-      <screenXY x="0.02" y="0.95" xunits="fraction" yunits="fraction"/>
-      <rotationXY x="0" y="0" xunits="fraction" yunits="fraction"/>
-      <size x="240" y="100" xunits="pixels" yunits="pixels"/>
-    </ScreenOverlay>
+    <!-- ScreenOverlays (logo + legend) are injected per-screen by sendKml() -->
 
-    <!-- Screen 5 Overlay: AQI Legend -->
-    <ScreenOverlay>
-      <name>AQI Environmental Legend</name>
-      <Icon>
-        <href>http://$host:$port/kml/legend_aqi.png</href>
-      </Icon>
-      <overlayXY x="1" y="0" xunits="fraction" yunits="fraction"/>
-      <screenXY x="0.98" y="0.05" xunits="fraction" yunits="fraction"/>
-      <rotationXY x="0" y="0" xunits="fraction" yunits="fraction"/>
-      <size x="230" y="250" xunits="pixels" yunits="pixels"/>
-    </ScreenOverlay>
-
-    <!-- 3D Extruded Grid Mesh & Station Spikes -->
-    ${LG3DVisuals.build3DMeshAndSpikes(
-      centerLat: lat,
-      centerLon: lon,
-      spanDeg: 3.5,
-      category: 'aqi',
-      severityFactor: severityFactor,
-      name: '$city Air Quality Mesh & Monitoring Spikes',
-    )}
+    <Folder>
+      <name>AQI Zones</name>
+      $rings
+    </Folder>
 
     <!-- City Station Placemark -->
     <Placemark>
       <name>$city Air Quality Center</name>
+      <styleUrl>#customBalloon</styleUrl>
       <description><![CDATA[
-        <b>$city Air Quality Index</b><br/>
-        PM2.5: ${pm25.toStringAsFixed(1)} µg/m³<br/>
+        <b>$city Air Quality — Past vs Present vs Future</b><br/>
+        <table border='1' cellpadding='4' style='border-collapse:collapse; width:300px; margin-top:10px;'>
+          <tr style='background:#f0f0f0'><th>Era</th><th>PM2.5 (µg/m³)</th><th>Status</th></tr>
+          <tr style='background:#d4edda'><td>~2000</td><td>~60.0</td><td>Moderate</td></tr>
+          <tr style='background:#fff3cd'><td><b>2026</b></td><td><b>${pm25.toStringAsFixed(1)}</b></td><td><b>[LIVE]</b></td></tr>
+          <tr style='background:#f8d7da'><td>2100</td><td>~${projectedPm25.toStringAsFixed(1)}</td><td>Projected</td></tr>
+        </table>
+        <br/>
+        <i>WHO Annual Guideline: 5 µg/m³</i><br/>
         Source: OpenAQ Real-Time Global Air Quality API
       ]]></description>
       <Point>
@@ -300,8 +333,6 @@ class ClimateDataService {
     final bbox = getBBox(regionId);
     final tileUrl = _buildGfwUrl(year);
     final canopyUrl = _buildCanopyUrl();
-    final host = lgService.state.ipAddress ?? 'localhost';
-    final port = lgService.state.webPort;
 
     return '''<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2"
@@ -326,29 +357,7 @@ class ClimateDataService {
       <altitudeMode>relativeToGround</altitudeMode>
     </LookAt>
 
-    <!-- Screen 1 Overlay: Liquid Galaxy Logo -->
-    <ScreenOverlay>
-      <name>Liquid Galaxy Logo</name>
-      <Icon>
-        <href>http://$host:$port/kml/lg_logo.png</href>
-      </Icon>
-      <overlayXY x="0" y="1" xunits="fraction" yunits="fraction"/>
-      <screenXY x="0.02" y="0.95" xunits="fraction" yunits="fraction"/>
-      <rotationXY x="0" y="0" xunits="fraction" yunits="fraction"/>
-      <size x="240" y="100" xunits="pixels" yunits="pixels"/>
-    </ScreenOverlay>
-
-    <!-- Screen 5 Overlay: Forest Legend -->
-    <ScreenOverlay>
-      <name>Forest Environmental Legend</name>
-      <Icon>
-        <href>http://$host:$port/kml/legend_forest.png</href>
-      </Icon>
-      <overlayXY x="1" y="0" xunits="fraction" yunits="fraction"/>
-      <screenXY x="0.98" y="0.05" xunits="fraction" yunits="fraction"/>
-      <rotationXY x="0" y="0" xunits="fraction" yunits="fraction"/>
-      <size x="230" y="250" xunits="pixels" yunits="pixels"/>
-    </ScreenOverlay>
+    <!-- ScreenOverlays (logo + legend) are injected per-screen by sendKml() -->
 
     <!-- Existing tree canopy (green layer, bottom) -->
     <GroundOverlay>
@@ -686,9 +695,12 @@ class ClimateDataService {
   }
 
   String _buildGfwUrl(int year) {
-    return 'https://api.resourcewatch.org/v1/layer/'
+    final url = 'https://api.resourcewatch.org/v1/layer/'
         'umd-tree-cover-loss/tile/gee/{z}/{x}/{y}'
         '?startYear=2000&endYear=$year';
+    // Escape for XML embedding — a raw "&" inside a KML <href> is invalid
+    // XML and breaks parsing of the whole document, not just this overlay.
+    return url.replaceAll('&', '&amp;');
   }
 
   String _buildCanopyUrl() {

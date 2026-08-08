@@ -41,9 +41,15 @@ class _ApiSetupScreenState extends State<ApiSetupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     return Scaffold(
-      backgroundColor: AppColors.bg0,
-      appBar: AppBar(title: const Text('API Setup')),
+      backgroundColor: colors.bg0,
+      appBar: AppBar(
+        title: const Text('API Setup'),
+        backgroundColor: colors.bg1,
+        foregroundColor: colors.textPrimary,
+        elevation: 0,
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
@@ -54,25 +60,25 @@ class _ApiSetupScreenState extends State<ApiSetupScreen> {
                 width: 64,
                 height: 64,
                 decoration: BoxDecoration(
-                  color: AppColors.bg2,
+                  color: colors.bg2,
                   shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFF1E2235)),
+                  border: Border.all(color: colors.cardBorder),
                 ),
                 child: const Icon(Icons.key_rounded,
                     color: AppColors.warning, size: 30),
               ),
               const SizedBox(height: 16),
-              Text('API Setup', style: AppTypography.heading2),
+              Text('API Setup', style: AppTypography.heading2.copyWith(color: colors.textPrimary)),
               Text(
                 'Encrypted via flutter_secure_storage',
-                style: AppTypography.bodySmall,
+                style: AppTypography.bodySmall.copyWith(color: colors.textSecondary),
               ),
               const SizedBox(height: 28),
 
               // Required section
               Align(
                 alignment: Alignment.centerLeft,
-                child: Text('REQUIRED', style: AppTypography.label),
+                child: Text('REQUIRED', style: AppTypography.label.copyWith(color: colors.textMuted)),
               ),
               const SizedBox(height: 12),
               _ApiKeyTile(
@@ -91,7 +97,7 @@ class _ApiSetupScreenState extends State<ApiSetupScreen> {
               // Free section
               Align(
                 alignment: Alignment.centerLeft,
-                child: Text('FREE & OPEN SOURCE', style: AppTypography.label),
+                child: Text('FREE & OPEN SOURCE', style: AppTypography.label.copyWith(color: colors.textMuted)),
               ),
               const SizedBox(height: 12),
               const _FreeApiTile(
@@ -113,18 +119,18 @@ class _ApiSetupScreenState extends State<ApiSetupScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: AppColors.bg3,
+                  color: colors.bg3,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Row(
+                child: Row(
                   children: [
                     Icon(Icons.lock_outline,
-                        color: AppColors.textMuted, size: 16),
+                        color: colors.textMuted, size: 16),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'Keys encrypted on-device. Never stored in plain text.',
-                        style: AppTypography.bodySmall,
+                        style: AppTypography.bodySmall.copyWith(color: colors.textSecondary),
                       ),
                     ),
                   ],
@@ -181,12 +187,13 @@ class _ApiKeyTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.bg2,
+        color: colors.bg2,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF1E2235)),
+        border: Border.all(color: colors.cardBorder),
       ),
       child: Column(
         children: [
@@ -198,8 +205,8 @@ class _ApiKeyTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title, style: AppTypography.bodyLarge),
-                    Text(subtitle, style: AppTypography.bodySmall),
+                    Text(title, style: AppTypography.bodyLarge.copyWith(color: colors.textPrimary)),
+                    Text(subtitle, style: AppTypography.bodySmall.copyWith(color: colors.textSecondary)),
                   ],
                 ),
               ),
@@ -214,17 +221,18 @@ class _ApiKeyTile extends StatelessWidget {
             controller: controller,
             obscureText: obscure,
             onChanged: onChanged,
-            style: const TextStyle(
+            style: TextStyle(
               fontFamily: 'monospace',
               fontSize: 13,
-              color: AppColors.textPrimary,
+              color: colors.textPrimary,
               letterSpacing: 1.5,
             ),
             decoration: InputDecoration(
               hintText: 'AIza••••••••••••',
+              hintStyle: TextStyle(color: colors.textMuted),
               suffixIcon: IconButton(
                 icon: Icon(obscure ? Icons.visibility_off : Icons.visibility,
-                    color: AppColors.textMuted, size: 18),
+                    color: colors.textMuted, size: 18),
                 onPressed: onToggleObscure,
               ),
             ),
@@ -250,12 +258,13 @@ class _FreeApiTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.bg2,
+        color: colors.bg2,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF1E2235)),
+        border: Border.all(color: colors.cardBorder),
       ),
       child: Row(
         children: [
@@ -265,8 +274,8 @@ class _FreeApiTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: AppTypography.bodyLarge),
-                Text(subtitle, style: AppTypography.bodySmall),
+                Text(title, style: AppTypography.bodyLarge.copyWith(color: colors.textPrimary)),
+                Text(subtitle, style: AppTypography.bodySmall.copyWith(color: colors.textSecondary)),
               ],
             ),
           ),

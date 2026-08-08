@@ -300,15 +300,16 @@ class _StoryModeScreenState extends State<StoryModeScreen>
       0, (sum, c) => sum + c.duration.inSeconds);
     final totalMinutes = totalDuration ~/ 60;
 
+    final colors = AppColors.of(context);
     return Scaffold(
-      backgroundColor: AppColors.bg0,
+      backgroundColor: colors.bg0,
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: 4),
+              SizedBox(height: 4),
 
               Row(children: [
                 Expanded(child: Column(
@@ -325,44 +326,59 @@ class _StoryModeScreenState extends State<StoryModeScreen>
                   builder: (_, snap) {
                     final connected = snap.data!.isConnected;
                     return Container(
-                      padding: const EdgeInsets.symmetric(
+                      padding: EdgeInsets.symmetric(
                           horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color: (connected
-                            ? AppColors.good
-                            : AppColors.warning).withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
+                        color: connected
+                            ? AppColors.good.withValues(alpha: 0.15)
+                            : AppColors.critical.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(20),
                         border: Border.all(
-                          color: (connected
-                              ? AppColors.good
-                              : AppColors.warning).withValues(alpha: 0.4),
+                          color: connected
+                              ? AppColors.good.withValues(alpha: 0.4)
+                              : AppColors.critical.withValues(alpha: 0.4),
                         ),
                       ),
-                      child: Row(children: [
-                        Container(
-                          width: 6, height: 6,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            connected ? Icons.cloud_done : Icons.cloud_off,
+                            size: 14,
                             color: connected
-                                ? AppColors.good : AppColors.warning,
+                                ? AppColors.good
+                                : AppColors.critical,
                           ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          connected ? 'LG Ready' : 'No LG',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: connected
-                                ? AppColors.good : AppColors.warning,
+                          SizedBox(width: 6),
+                          Text(
+                            connected ? 'LG Connected' : 'LG Disconnected',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: connected
+                                  ? AppColors.good
+                                  : AppColors.critical,
+                            ),
                           ),
-                        ),
-                      ]),
+                        ],
+                      ),
                     );
                   },
                 ),
               ]),
-              const SizedBox(height: 24),
+              SizedBox(height: 24),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('STORY PROGRESS', style: AppTypography.label),
+                  Text(
+                    '${_completedUpTo + 1} / ${_chapters.length}',
+                    style: AppTypography.caption,
+                  ),
+                ],
+              ),
+              SizedBox(height: 24),
 
               _NowPlayingCard(
                 chapter:  chapter,
@@ -445,15 +461,16 @@ class _NowPlayingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppColors.bg2,
+        color: colors.bg2,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: isPlaying
               ? chapter.color.withValues(alpha: 0.4)
-              : const Color(0xFF1E2235),
+              : colors.cardBorder,
         ),
       ),
       child: Column(
@@ -601,6 +618,7 @@ class _ChapterTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     final mins = chapter.duration.inMinutes;
     final secs = chapter.duration.inSeconds.remainder(60)
         .toString().padLeft(2, '0');
@@ -614,12 +632,12 @@ class _ChapterTile extends StatelessWidget {
         decoration: BoxDecoration(
           color: isCurrent
               ? chapter.color.withValues(alpha: 0.08)
-              : AppColors.bg2,
+              : colors.bg2,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: isCurrent
                 ? chapter.color.withValues(alpha: 0.4)
-                : const Color(0xFF1E2235),
+                : colors.cardBorder,
             width: isCurrent ? 1.5 : 1,
           ),
         ),

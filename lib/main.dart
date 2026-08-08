@@ -11,21 +11,26 @@ import 'package:climate_storyteller/core/di/injection_container.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await DI.languageService.init();
+  await DI.themeService.init();
 
   // Lock to portrait orientation (smartphone controller)
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
   ]);
 
-  // Set system overlay style to match dark theme
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.light,
-    systemNavigationBarColor: AppColors.bg1,
-    systemNavigationBarIconBrightness: Brightness.light,
-  ));
+  // Set initial system overlay style
+  _updateSystemOverlayStyle(DI.themeService.isDarkMode);
 
   runApp(const ClimateStorytellerApp());
+}
+
+void _updateSystemOverlayStyle(bool isDark) {
+  SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+    systemNavigationBarColor: AppColors.bg1,
+    systemNavigationBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+  ));
 }
 
 class ClimateStorytellerApp extends StatelessWidget {
@@ -33,12 +38,23 @@ class ClimateStorytellerApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Climate Storyteller',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.dark,
-      initialRoute: AppRoutes.onboarding,
-      onGenerateRoute: _generateRoute,
+    return StreamBuilder<ThemeMode>(
+      stream: DI.themeService.themeStream,
+      initialData: DI.themeService.currentThemeMode,
+      builder: (context, snapshot) {
+        final themeMode = snapshot.data ?? ThemeMode.light;
+        _updateSystemOverlayStyle(DI.themeService.isDarkMode);
+
+        return MaterialApp(
+          title: 'Climate Storyteller',
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.light,
+          darkTheme: AppTheme.dark,
+          themeMode: themeMode,
+          initialRoute: AppRoutes.onboarding,
+          onGenerateRoute: _generateRoute,
+        );
+      },
     );
   }
 

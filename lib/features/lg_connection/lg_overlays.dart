@@ -26,9 +26,9 @@ class LGOverlays {
 
     for (int i = 0; i < 4; i++) {
       final x = 20 + i * 22;
-      final y = 20;
-      final w = 18;
-      final h = 45;
+      const y = 20;
+      const w = 18;
+      const h = 45;
       final c = colors[i];
       _fillRoundedRect(pixels, width, height, x, y, w, h, 6, c[0], c[1], c[2], 255);
     }
@@ -45,16 +45,20 @@ class LGOverlays {
   }
 
   /// Returns PNG bytes for an Environmental Index Legend overlay card.
-  static Uint8List createLegendPng(String category) {
+  static Uint8List createLegendPng(
+    String category, {
+    String? eraLabel,
+    Map<String, String>? stats,
+  }) {
     const width = 260;
-    const height = 280;
+    final height = (stats != null && stats.isNotEmpty) ? 380 : 280;
     final pixels = Uint8List(width * height * 4);
 
     // Background: Dark semi-transparent card
     _fillRect(pixels, width, height, 0, 0, width, height, 15, 18, 30, 230);
     _drawRectBorder(pixels, width, height, 0, 0, width, height, 50, 65, 90, 255, 2);
 
-    final title = switch (category) {
+    var title = switch (category) {
       'aqi'      => 'AQI INDEX LEGEND',
       'forest'   => 'FOREST COVER LEGEND',
       'sealevel' => 'SEA LEVEL RISE LEGEND',
@@ -62,6 +66,14 @@ class LGOverlays {
       'heat'     => 'HEAT ANOMALY LEGEND',
       _          => 'ENVIRONMENTAL LEGEND',
     };
+
+    if (eraLabel != null && eraLabel.isNotEmpty) {
+      title = '$title ($eraLabel)';
+    }
+
+    if (stats != null && stats.isNotEmpty) {
+      title = '$title'; // Keep era in title, but let's add a "PAST -> NOW -> FUTURE" header in the key data section later
+    }
 
     final items = switch (category) {
       'aqi' => [
@@ -121,6 +133,34 @@ class LGOverlays {
       // Label Text
       _drawSimpleText(pixels, width, height, label, 56, y + 8, 225, 235, 245, 255, scale: 1);
     }
+
+    // KEY DATA section
+    if (stats != null && stats.isNotEmpty) {
+      _drawLine(pixels, width, height, 16, 260, width - 16, 260, 60, 75, 105, 255, 1);
+      _drawSimpleText(pixels, width, height, 'KEY DATA (PAST -> NOW -> FUTURE)', 16, 270, 255, 255, 255, 255, scale: 1);
+
+      final statEntries = stats.entries.take(4).toList();
+      for (int i = 0; i < statEntries.length; i++) {
+        final entry = statEntries[i];
+        final statY = 286 + i * 16;
+        _drawSimpleText(
+          pixels, width, height,
+          '${entry.key}: ${entry.value}',
+          16, statY,
+          100, 200, 255, 255,
+          scale: 1,
+        );
+      }
+    }
+
+    // Source Attribution
+    _drawSimpleText(
+      pixels, width, height,
+      'Source: IPCC AR6 SSP3-7.0',
+      16, height - 18,
+      120, 130, 150, 200,
+      scale: 1,
+    );
 
     return _encodePng(pixels, width, height);
   }
