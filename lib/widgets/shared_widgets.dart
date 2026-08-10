@@ -424,20 +424,26 @@ class CTAButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = AppColors.of(context);
     if (isSecondary) {
       return OutlinedButton.icon(
         onPressed: onPressed,
-        icon: icon != null ? Icon(icon, size: 18) : const SizedBox.shrink(),
-        label: Text(label),
+        icon: icon != null ? Icon(icon, size: 18, color: AppColors.primary) : const SizedBox.shrink(),
+        label: Text(label, style: const TextStyle(color: AppColors.primary)),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.primary,
+          side: const BorderSide(color: AppColors.primary),
+        ),
       );
     }
     return ElevatedButton.icon(
       onPressed: onPressed,
       icon: icon != null
-          ? Icon(icon, size: 18, color: colors.bg0)
+          ? Icon(icon, size: 18, color: Colors.white)
           : const SizedBox.shrink(),
-      label: Text(label),
+      label: Text(label, style: const TextStyle(color: Colors.white)),
+      style: ElevatedButton.styleFrom(
+        foregroundColor: Colors.white,
+      ),
     );
   }
 }

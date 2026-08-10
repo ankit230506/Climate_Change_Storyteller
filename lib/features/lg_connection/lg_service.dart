@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -23,52 +23,40 @@ import 'package:climate_storyteller/core/storage/secure_storage_service.dart';
 ///   7 screens: branding, history, reference, main, analysis, graphs, legend
 enum ScreenRole { branding, history, reference, main, analysis, graphs, legend }
 
-/// Assigns a [ScreenRole] to every screen index (1-based) for a rig with
-/// [screenCount] screens. Works for any screen count, not just 3/5/7 — for
-/// counts outside that set it falls back to a sensible symmetric spread
-/// (context roles on the left half, analysis roles on the right half,
-/// [ScreenRole.main] at the center) so the layout degrades gracefully
-/// instead of breaking.
-List<ScreenRole> buildScreenRoles(int screenCount) {
-  if (screenCount <= 1) return [ScreenRole.main];
-  if (screenCount == 2) return [ScreenRole.branding, ScreenRole.legend];
+/// Returns the 1-based physical screen number of the Left-Most screen
+/// on a Liquid Galaxy rig with [screenCount] screens.
+/// Standard LG physical layout: Screen 1 is Master (Center).
+/// Odd screens > 1 (3, 5, 7) are situated on the left.
+/// Even screens (2, 4, 6) are situated on the right.
+int getLeftMostScreenNumber(int screenCount) {
+  if (screenCount <= 1) return 1;
+  if (screenCount == 2) return 2;
+  if (screenCount % 2 == 1) return screenCount; // 3 -> lg3, 5 -> lg5, 7 -> lg7
+  return screenCount - 1;
+}
 
-  // Known, exact layouts from the spec.
-  const known = <int, List<ScreenRole>>{
-    3: [ScreenRole.branding, ScreenRole.main, ScreenRole.legend],
-    5: [
-      ScreenRole.branding,
-      ScreenRole.history,
-      ScreenRole.main,
-      ScreenRole.analysis,
-      ScreenRole.legend,
-    ],
-    7: [
-      ScreenRole.branding,
-      ScreenRole.history,
-      ScreenRole.reference,
-      ScreenRole.main,
-      ScreenRole.analysis,
-      ScreenRole.graphs,
-      ScreenRole.legend,
-    ],
-  };
-  if (known.containsKey(screenCount)) return known[screenCount]!;
+/// Returns the 1-based physical screen number of the Right-Most screen
+/// on a Liquid Galaxy rig with [screenCount] screens.
+int getRightMostScreenNumber(int screenCount) {
+  if (screenCount <= 1) return 1;
+  if (screenCount == 2) return 1;
+  if (screenCount % 2 == 1) return screenCount - 1; // 3 -> lg2, 5 -> lg4, 7 -> lg6
+  return screenCount;
+}
 
-  // Generic fallback for any other screen count: branding first, legend
-  // last, main dead-center, context roles filling outward symmetrically.
-  final middleCount = screenCount - 2;
-  final beforePool = [ScreenRole.reference, ScreenRole.history];
-  final afterPool = [ScreenRole.analysis, ScreenRole.graphs];
-  final center = middleCount ~/ 2;
-  final middle = List<ScreenRole>.filled(middleCount, ScreenRole.main);
-  for (int i = 0; i < center; i++) {
-    middle[center - 1 - i] = beforePool[i < beforePool.length ? i : beforePool.length - 1];
-  }
-  for (int i = 0; i < middleCount - center - 1; i++) {
-    middle[center + 1 + i] = afterPool[i < afterPool.length ? i : afterPool.length - 1];
-  }
-  return [ScreenRole.branding, ...middle, ScreenRole.legend];
+/// Returns the 1-based physical screen number of the Master / Center screen.
+int getMasterScreenNumber(int screenCount) => 1;
+
+class LgViewpoint {
+  final double latitude;
+  final double longitude;
+  final double range;
+
+  const LgViewpoint({
+    required this.latitude,
+    required this.longitude,
+    required this.range,
+  });
 }
 
 class LgService {
@@ -87,35 +75,18 @@ class LgService {
 
   static const _gibsBase = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi';
   static const _noaaBase = 'https://www.ncei.noaa.gov/cdo-web/api/v2';
+  static const String kLgLogoUrl =
+      'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEgXmdNgBTXup6bdWew5RzgCmC9pPb7rK487CpiscWB2S8OlhwFHmeeACHIIjx4B5-Iv-t95mNUx0JhB_oATG3-Tq1gs8Uj0-Xb9Njye6rHtKKsnJQJlzZqJxMDnj_2TXX3eA5x6VSgc8aw/s320-rw/LOGO+LIQUID+GALAXY-sq1000-+OKnoline.png';
 
-  // Default camera tilt used for LookAt blocks. 0 = straight-down (nadir),
-  // which makes vertical 3D faces (box walls, pyramid faces, dome faces,
-  // column sides) render edge-on and effectively invisible. A tilt in the
-  // 50-65 degree range gives the camera an oblique angle so extruded/3D
-  // KML geometry is actually visible on the rig screens.
+  // Oblique camera tilt so extruded/3D geometry is visible on screens
   static const double _default3DTilt = 60.0;
   static const double _default3DHeading = 30.0;
 
   static const Map<String, String> _gibsLayers = {
-    // MODIS_Terra_Sea_Ice_Extent tracks OCEAN sea ice only ("coverage is
-    // global, however only ocean pixels are evaluated for sea ice" — NSIDC
-    // user guide). A landlocked mountain/glacier region like the Himalayas
-    // has zero ocean pixels, so this layer returns no data there on ANY
-    // date — which Google Earth renders as a broken-image red X across the
-    // whole GroundOverlay. MODIS_Terra_NDSI_Snow_Cover tracks snow/ice over
-    // LAND instead, actually has data over mountain glaciers, and (bonus)
-    // its daily record starts on the exact same 2000-02-24 date already
-    // used for the preindustrial1900 era below.
     'glacier':  'MODIS_Terra_NDSI_Snow_Cover',
     'sealevel': 'VIIRS_NOAA20_CorrectedReflectance_TrueColor',
     'forest':   'MODIS_Terra_NDVI_8Day',
     'heat':     'MODIS_Terra_Land_Surface_Temp_Day',
-    // Previously there was no 'aqi' entry at all, so any AQI-category
-    // region fell through to _gibsLayers['glacier'] (the snow-cover layer)
-    // — geographically meaningless for most AQI regions (usually cities,
-    // not snowfields) and yet another case of "wrong satellite layer for
-    // the category." Aerosol Optical Depth is the correct proxy for
-    // haze/particulate pollution.
     'aqi':      'MODIS_Terra_Aerosol',
   };
 
@@ -162,8 +133,8 @@ class LgService {
       for (int i = 2; i <= screenCount; i++) {
         try {
           await execute(
-            'sshpass -p lg ssh -o StrictHostKeyChecking=no '
-            'lg@lg$i "mkdir -p $_kmlDir" 2>&1'
+            'sshpass -p $password ssh -o StrictHostKeyChecking=no '
+            '$username@lg$i "mkdir -p $_kmlDir" 2>&1'
           );
         } catch (_) {}
       }
@@ -232,20 +203,16 @@ class LgService {
 
       _startKeepalive();
 
-      // Ensure the KML directory is owned by lg and readable by the web
-      // server so that files written via SFTP or shell are served correctly.
+      // Set permissions on the KML directory
       await execute('sudo chown -R lg:lg $_kmlDir 2>/dev/null; '
           'chmod -R 755 $_kmlDir 2>/dev/null; '
           'chmod 755 /var/www/html 2>/dev/null');
 
-      // Automatically configure the NetworkLink in Google Earth's
-      // MyPlaces.kml so it polls kmls.txt for KML content.  Without this
-      // step, Google Earth has no idea where to look for KMLs and nothing
-      // renders — even though files are being written correctly.
+      // Configure the NetworkLink in Google Earth's MyPlaces.kml
       try {
         await setupNetworkLink();
+        await _sendInitialConnectionOverlays();
       } catch (e) {
-        // Non-fatal: the user can still manually trigger this from Settings.
         // ignore: avoid_print
         print('Auto setupNetworkLink failed: $e');
       }
@@ -283,6 +250,122 @@ class LgService {
   // LG Action Methods
   // ─────────────────────────────────────────────
 
+  /// Immediately sends a time command to Liquid Galaxy query.txt
+  /// moving Google Earth's time slider clock in real-time (0ms latency).
+  Future<void> sendTimeQuery(
+    int year, {
+    double? latitude,
+    double? longitude,
+    double? altitude,
+  }) async {
+    if (_client == null || !_state.isConnected) return;
+    try {
+      final timeStr = '$year-01-01T00:00:00Z';
+      final endStr = '$year-12-31T23:59:59Z';
+      await execute("echo 'time=$timeStr' > $_queryFile");
+      await execute("echo 'timeSpan=$timeStr/$endStr' > $_queryFile");
+      await execute("echo 'clock=$timeStr' > $_queryFile");
+
+      if (latitude != null && longitude != null) {
+        final alt = altitude ?? 200000.0;
+        final flyStr = 'flytoview=<LookAt><longitude>$longitude</longitude><latitude>$latitude</latitude><range>$alt</range><tilt>45</tilt><heading>0</heading><altitudeMode>relativeToGround</altitudeMode><TimeSpan><begin>$timeStr</begin><end>$endStr</end></TimeSpan></LookAt>';
+        await execute("echo '$flyStr' > $_queryFile");
+      }
+    } catch (e) {
+      debugPrint('sendTimeQuery error: $e');
+    }
+  }
+
+  // ── Bi-directional LG viewpoint synchronization stream ──────────────────
+  Timer? _bgViewpointTimer;
+  final _viewpointCtrl = StreamController<LgViewpoint>.broadcast();
+
+  /// Stream of camera position coordinates received from LG globe (Bi-directional sync)
+  Stream<LgViewpoint> get lgViewpointStream => _viewpointCtrl.stream;
+
+  void startLgViewpointPolling() {
+    _bgViewpointTimer?.cancel();
+    _bgViewpointTimer = Timer.periodic(const Duration(milliseconds: 600), (_) async {
+      if (_client == null || !_state.isConnected) return;
+      try {
+        final out = await execute(
+          'cat /tmp/views.txt 2>/dev/null || '
+          'cat /var/www/cgi-bin/views.txt 2>/dev/null || '
+          'cat /tmp/query.txt 2>/dev/null'
+        );
+        if (out.isNotEmpty) {
+          final vp = _parseLgQueryViewpoint(out);
+          if (vp != null) {
+            _viewpointCtrl.add(vp);
+          }
+        }
+      } catch (_) {}
+    });
+  }
+
+  void stopLgViewpointPolling() {
+    _bgViewpointTimer?.cancel();
+    _bgViewpointTimer = null;
+  }
+
+  LgViewpoint? _parseLgQueryViewpoint(String queryText) {
+    try {
+      // 1. Try XML tag format: <latitude>-3.4653</latitude>, <longitude>-62.2159</longitude>
+      var latMatch = RegExp(r'<latitude>\s*([0-9.-]+)\s*</latitude>').firstMatch(queryText);
+      var lonMatch = RegExp(r'<longitude>\s*([0-9.-]+)\s*</longitude>').firstMatch(queryText);
+      var rangeMatch = RegExp(r'<range>\s*([0-9.-]+)\s*</range>').firstMatch(queryText);
+
+      // 2. Try query param format: latitude=-3.4653, longitude=-62.2159
+      latMatch ??= RegExp(r'latitude=([0-9.-]+)').firstMatch(queryText);
+      lonMatch ??= RegExp(r'longitude=([0-9.-]+)').firstMatch(queryText);
+      rangeMatch ??= RegExp(r'range=([0-9.-]+)').firstMatch(queryText);
+
+      if (latMatch != null && lonMatch != null) {
+        final lat = double.parse(latMatch.group(1)!);
+        final lon = double.parse(lonMatch.group(1)!);
+        final range = rangeMatch != null ? double.parse(rangeMatch.group(1)!) : 100000.0;
+        return LgViewpoint(latitude: lat, longitude: lon, range: range);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Real-time KML sender: uploads KML and forces Google Earth to load it immediately via /tmp/query.txt
+  Future<void> sendKmlRealtime(String kmlFilename, {String? kmlContent}) async {
+    if (_client == null || !_state.isConnected) return;
+    try {
+      await sendKml(kmlFilename, kmlContent: kmlContent);
+      final host = _state.ipAddress ?? 'localhost';
+      final port = _state.webPort;
+      final kmlUrl = 'http://$host:$port/kmls_1.txt';
+      await execute("echo '$kmlUrl' > $_queryFile");
+    } catch (e) {
+      debugPrint('sendKmlRealtime error: $e');
+    }
+  }
+
+  Timer? _kmlDebounceTimer;
+
+  /// Debounced version of sendKml() for continuous UI controls (e.g. time sliders).
+  /// Delays execution until [duration] has passed without any new calls.
+  Future<void> sendKmlDebounced(
+    String kmlFilename, {
+    String? kmlContent,
+    Duration duration = const Duration(milliseconds: 100),
+  }) async {
+    _kmlDebounceTimer?.cancel();
+    final completer = Completer<void>();
+    _kmlDebounceTimer = Timer(duration, () async {
+      try {
+        await sendKmlRealtime(kmlFilename, kmlContent: kmlContent);
+        if (!completer.isCompleted) completer.complete();
+      } catch (e) {
+        if (!completer.isCompleted) completer.completeError(e);
+      }
+    });
+    return completer.future;
+  }
+
   Future<void> sendKml(String kmlFilename, {String? kmlContent}) async {
     if (_client == null) throw Exception('Not connected');
 
@@ -290,22 +373,14 @@ class LgService {
     final category = _extractCategoryFromFilename(kmlFilename);
     await _uploadOverlayAssets(category);
 
-    // Build the KML that Google Earth will actually render. If the caller
-    // supplied full KML content, use it; otherwise create a NetworkLink
-    // wrapper that points to the file on the web server.
     final host = _state.ipAddress ?? 'localhost';
     final kmlUrl = 'http://$host:${_state.webPort}/kml/$kmlFilename';
     final netLinkKml = _buildNetworkLinkKml(kmlUrl);
 
-    // 1. Upload the actual KML content file to the master's web server via
-    //    SFTP.  This completely bypasses shell escaping / ARG_MAX issues
-    //    that caused large KMLs to silently fail.
     if (kmlContent != null && kmlContent.isNotEmpty) {
       await _sftpUpload('$_kmlDir/$kmlFilename', utf8.encode(kmlContent));
     }
 
-    // 2. Upload NetworkLink wrappers for each screen slot (master reads
-    //    these from the local filesystem).
     final netLinkBytes = utf8.encode(netLinkKml);
     for (int i = 1; i <= _state.screenCount; i++) {
       await _sftpUpload('$_kmlDir/kml_$i.kml', netLinkBytes);
@@ -313,44 +388,50 @@ class LgService {
     }
     await _sftpUpload('$_kmlDir/master.kml', netLinkBytes);
 
-    // 3. Write the sync file that Google Earth's MyPlaces.kml NetworkLink
-    //    actually polls (every 2 s, per setupNetworkLink()).  This MUST
-    //    contain valid KML XML — not a plain URL string — or GE silently
-    //    ignores it and nothing renders on screen.
-    //
-    //    If we have the full KML content, write it directly so GE renders
-    //    it immediately.  Otherwise write the NetworkLink wrapper so GE
-    //    fetches the file from the web server.
-    //    Previously the exact same content — including BOTH the logo and
-    //    legend ScreenOverlays baked in together — was written to every
-    //    screen's sync file, which is why every screen on the rig showed
-    //    duplicate logo/legend boxes stacked on top of its own view instead
-    //    of a clean multi-screen layout like the mockups (logo only on the
-    //    first screen, legend/stats only on the last screen, clean scene
-    //    geometry on the screens in between).
     if (kmlContent != null && kmlContent.isNotEmpty) {
       final sceneOnly = _stripScreenOverlays(kmlContent);
       final logoBlock = _extractScreenOverlay(kmlContent, 'lg_logo.png');
       final legendBlock = _extractScreenOverlay(kmlContent, 'legend_');
-      final roles = buildScreenRoles(_state.screenCount);
+
+      final leftScreenIndex = getLeftMostScreenNumber(_state.screenCount);
+      final masterScreenIndex = getMasterScreenNumber(_state.screenCount);
+      final rightScreenIndex = getRightMostScreenNumber(_state.screenCount);
+
+      final webPort = _state.webPort;
+      final effectiveLogoBlock = logoBlock.isNotEmpty
+          ? logoBlock
+          : '''<ScreenOverlay>
+      <name>Liquid Galaxy Logo</name>
+      <Icon><href>http://$host:$webPort/kml/lg_logo.png</href></Icon>
+      <overlayXY x="0" y="1" xunits="fraction" yunits="fraction"/>
+      <screenXY x="0.02" y="0.95" xunits="fraction" yunits="fraction"/>
+      <rotationXY x="0" y="0" xunits="fraction" yunits="fraction"/>
+      <size x="180" y="180" xunits="pixels" yunits="pixels"/>
+    </ScreenOverlay>''';
 
       for (int i = 1; i <= _state.screenCount; i++) {
-        final role = roles[i - 1];
         var screenKml = sceneOnly;
-        if (role == ScreenRole.branding && logoBlock.isNotEmpty) {
-          screenKml = screenKml.replaceFirst('</Document>', '$logoBlock</Document>');
+
+        if (i == leftScreenIndex) {
+          screenKml = _stripPlacemarks(screenKml);
+          screenKml = _stripTimeSpans(screenKml);
+          screenKml = screenKml.replaceFirst('</Document>', '$effectiveLogoBlock</Document>');
+        } else if (i == masterScreenIndex) {
+          screenKml = _stripBalloonVisibility(screenKml);
+        } else if (i == rightScreenIndex) {
+          screenKml = _stripTimeSpans(screenKml);
+          if (legendBlock.isNotEmpty) {
+            screenKml = screenKml.replaceFirst('</Document>', '$legendBlock</Document>');
+          }
+          screenKml = _ensureBalloonVisibility(screenKml);
+        } else {
+          screenKml = _stripTimeSpans(screenKml);
+          screenKml = _stripBalloonVisibility(screenKml);
         }
-        if (role == ScreenRole.legend && legendBlock.isNotEmpty) {
-          screenKml = screenKml.replaceFirst('</Document>', '$legendBlock</Document>');
-        }
-        // NOTE: history/reference/main/analysis/graphs roles all currently
-        // receive the same base scene. Giving each of these its own
-        // distinct content (a real history layer, analysis layer, chart
-        // panel, etc.) is the next phase of work, done per data category.
+
         final screenBytes = utf8.encode(screenKml);
         await _sftpUpload('/var/www/html/kmls_$i.txt', screenBytes);
-        if (role == ScreenRole.branding) {
-          // Keep kmls.txt (legacy/manual-check path) mirroring screen 1.
+        if (i == masterScreenIndex) {
           await _sftpUpload(_kmlSyncFile, screenBytes);
         }
       }
@@ -361,14 +442,47 @@ class LgService {
       }
     }
 
-    // NOTE: We intentionally do NOT write the KML URL to /tmp/query.txt
-    // here.  The previous code did `echo '$kmlUrl' > /tmp/query.txt` which
-    // raced with flyTo() — the caller typically calls flyTo() right after
-    // sendKml(), which overwrites query.txt with the LookAt command before
-    // GE could read the KML URL.  The NetworkLink/sync approach above is
-    // the reliable delivery mechanism.
-
     _update(_state.copyWith(currentKml: kmlFilename));
+  }
+
+  /// Clears all loaded KML layers, placemarks, and overlays from Liquid Galaxy screens.
+  Future<void> cleanKml() async {
+    if (_client == null || !_state.isConnected) return;
+    try {
+      stopOrbit();
+      final emptyKml = '''<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Liquid Galaxy Cleared</name>
+  </Document>
+</kml>''';
+      final emptyBytes = utf8.encode(emptyKml);
+      for (int i = 1; i <= _state.screenCount; i++) {
+        await _sftpUpload('/var/www/html/kmls_$i.txt', emptyBytes);
+      }
+      await _sftpUpload(_kmlSyncFile, emptyBytes);
+      await execute("echo 'exittour=true' > $_queryFile");
+      _update(_state.copyWith(currentKml: null));
+    } catch (e) {
+      debugPrint('cleanKml error: $e');
+    }
+  }
+
+  String _stripBalloonVisibility(String kml) {
+    return kml.replaceAll(
+      RegExp(r'<gx:balloonVisibility>\s*1\s*</gx:balloonVisibility>', dotAll: true),
+      '<gx:balloonVisibility>0</gx:balloonVisibility>',
+    );
+  }
+
+  String _ensureBalloonVisibility(String kml) {
+    if (kml.contains('<gx:balloonVisibility>')) {
+      return kml.replaceAll(
+        RegExp(r'<gx:balloonVisibility>\s*0\s*</gx:balloonVisibility>', dotAll: true),
+        '<gx:balloonVisibility>1</gx:balloonVisibility>',
+      );
+    }
+    return kml.replaceAll('<Placemark>', '<Placemark><gx:balloonVisibility>1</gx:balloonVisibility>');
   }
 
   /// Returns the first `<ScreenOverlay>...</ScreenOverlay>` block in [kml]
@@ -395,10 +509,87 @@ class LgService {
         '',
       );
 
+  String _stripTimeSpans(String kml) {
+    return kml
+        .replaceAll(RegExp(r'<TimeSpan>.*?</TimeSpan>', dotAll: true), '')
+        .replaceAll(RegExp(r'<TimeStamp>.*?</TimeStamp>', dotAll: true), '');
+  }
+
+  String _stripPlacemarks(String kml) {
+    return kml.replaceAll(
+      RegExp(r'<Placemark>.*?</Placemark>', dotAll: true),
+      '',
+    );
+  }
+
+  Future<void> _sendInitialConnectionOverlays() async {
+    if (_client == null || !_state.isConnected) return;
+    try {
+      final host = _state.ipAddress ?? 'localhost';
+      final port = _state.webPort;
+
+      final logoPng = await _fetchOrGenerateLgLogoPng();
+      await _sftpUpload('$_kmlDir/lg_logo.png', logoPng);
+
+      final leftScreenIndex = getLeftMostScreenNumber(_state.screenCount);
+
+      final logoKml = '''<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Liquid Galaxy Initial Branding</name>
+    <visibility>1</visibility>
+    <ScreenOverlay>
+      <name>Liquid Galaxy Logo</name>
+      <Icon>
+        <href>http://$host:$port/kml/lg_logo.png</href>
+      </Icon>
+      <overlayXY x="0" y="1" xunits="fraction" yunits="fraction"/>
+      <screenXY x="0.02" y="0.95" xunits="fraction" yunits="fraction"/>
+      <rotationXY x="0" y="0" xunits="fraction" yunits="fraction"/>
+      <size x="180" y="180" xunits="pixels" yunits="pixels"/>
+    </ScreenOverlay>
+  </Document>
+</kml>''';
+
+      final emptyKml = '''<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Liquid Galaxy Base</name>
+    <visibility>1</visibility>
+  </Document>
+</kml>''';
+
+      for (int i = 1; i <= _state.screenCount; i++) {
+        if (i == leftScreenIndex) {
+          await _sftpUpload('/var/www/html/kmls_$i.txt', utf8.encode(logoKml));
+        } else {
+          await _sftpUpload('/var/www/html/kmls_$i.txt', utf8.encode(emptyKml));
+        }
+      }
+      await _sftpUpload(_kmlSyncFile, utf8.encode(emptyKml));
+    } catch (e) {
+      debugPrint('_sendInitialConnectionOverlays error: $e');
+    }
+  }
+
+  Uint8List? _cachedLogoBytes;
+
+  Future<Uint8List> _fetchOrGenerateLgLogoPng() async {
+    if (_cachedLogoBytes != null) return _cachedLogoBytes!;
+    try {
+      final res = await http.get(Uri.parse(kLgLogoUrl)).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+        _cachedLogoBytes = res.bodyBytes;
+        return res.bodyBytes;
+      }
+    } catch (_) {}
+    return LGOverlays.createLgLogoPng();
+  }
+
   Future<void> _uploadOverlayAssets(String category) async {
     if (_client == null) return;
     try {
-      final logoPng = LGOverlays.createLgLogoPng();
+      final logoPng = await _fetchOrGenerateLgLogoPng();
       await _sftpUpload('$_kmlDir/lg_logo.png', logoPng);
 
       final legendPng = LGOverlays.createLegendPng(category);
@@ -408,19 +599,8 @@ class LgService {
     } catch (_) {}
   }
 
-  // ─────────────────────────────────────────────
-  // SFTP Upload Helper
-  // ─────────────────────────────────────────────
-
-  /// Uploads [data] to [remotePath] on the connected LG master node via
-  /// SFTP.  Falls back to a shell-based write if SFTP is unavailable.
-  ///
-  /// This is the correct way to deliver KML/PNG payloads to the rig:
-  ///   • No shell escaping issues (base64 only uses A-Z,a-z,0-9,+,/,=)
-  ///   • Handles large files via chunked base64 writes
-  ///   • Falls back reliably to shell if SFTP is unavailable
+  // Uploads data to remotePath via SFTP or falls back to a base64 shell pipe.
   Future<void> _sftpUpload(String remotePath, List<int> data) async {
-    // Preferred path: use the persistent SFTP session
     if (_sftp != null) {
       try {
         final file = await _sftp!.open(
@@ -431,31 +611,21 @@ class LgService {
         );
         await file.writeBytes(Uint8List.fromList(data));
         await file.close();
-        // Ensure web server can read it
         await execute('chmod 644 $remotePath 2>/dev/null');
         return;
       } catch (e) {
-        // SFTP write failed — fall through to shell fallback
         // ignore: avoid_print
         print('SFTP upload failed for $remotePath: $e — falling back to shell');
       }
     }
 
-    // Fallback: pipe base64 through base64 -d.  This is reliable because:
-    //   • base64 output only contains [A-Za-z0-9+/=] — no single quotes
-    //   • echo '...' is universally supported in SSH exec channels
-    //   • For large payloads we chunk into multiple appended writes
     final b64 = base64Encode(data);
-    const chunkSize = 65000; // Stay well within typical ARG_MAX (~128KB)
+    const chunkSize = 65000;
 
     if (b64.length <= chunkSize) {
-      // Small payload — single echo pipe
       await execute("echo '$b64' | base64 -d > $remotePath");
     } else {
-      // Large payload — accumulate base64 chunks, then decode once.
-      // This avoids partial base64 decode issues (base64 -d needs
-      // complete padding groups).
-      await execute("> $remotePath.b64");  // truncate/create
+      await execute("> $remotePath.b64");
       for (int offset = 0; offset < b64.length; offset += chunkSize) {
         final end = (offset + chunkSize).clamp(0, b64.length);
         final chunk = b64.substring(offset, end);
@@ -464,7 +634,6 @@ class LgService {
       await execute('base64 -d $remotePath.b64 > $remotePath && rm -f $remotePath.b64');
     }
 
-    // Ensure web server (www-data / apache) can read the file
     await execute('chmod 644 $remotePath 2>/dev/null');
   }
 
@@ -478,6 +647,74 @@ class LgService {
     return 'aqi';
   }
 
+  double? _lastFlyToLat;
+  double? _lastFlyToLon;
+  double? _lastFlyToAlt;
+
+  Timer? _orbitTimer;
+  double _currentOrbitHeading = 0.0;
+
+  Future<void> startOrbit({
+    double? latitude,
+    double? longitude,
+    double? altitude,
+    double tilt = _default3DTilt,
+    double speed = 3.5,
+  }) async {
+    stopOrbit();
+
+    final targetLat = latitude ?? _lastFlyToLat ?? 28.6139;
+    final targetLon = longitude ?? _lastFlyToLon ?? 77.2090;
+    final targetAlt = altitude ?? _lastFlyToAlt ?? 180000.0;
+
+    _update(_state.copyWith(isOrbiting: true));
+
+    _orbitTimer = Timer.periodic(const Duration(milliseconds: 120), (timer) async {
+      if (!_state.isConnected || _client == null) {
+        stopOrbit();
+        return;
+      }
+      _currentOrbitHeading = (_currentOrbitHeading + speed) % 360.0;
+      try {
+        final lookAtKml =
+            'flytoview=<LookAt>'
+            '<longitude>$targetLon</longitude>'
+            '<latitude>$targetLat</latitude>'
+            '<altitude>0</altitude>'
+            '<heading>${_currentOrbitHeading.toStringAsFixed(1)}</heading>'
+            '<tilt>$tilt</tilt>'
+            '<range>$targetAlt</range>'
+            '<altitudeMode>relativeToGround</altitudeMode>'
+            '</LookAt>';
+        await execute("echo '$lookAtKml' > $_queryFile");
+      } catch (_) {}
+    });
+  }
+
+  void stopOrbit() {
+    _orbitTimer?.cancel();
+    _orbitTimer = null;
+    if (_state.isOrbiting) {
+      _update(_state.copyWith(isOrbiting: false));
+    }
+  }
+
+  Future<void> toggleOrbit({
+    double? latitude,
+    double? longitude,
+    double? altitude,
+  }) async {
+    if (_state.isOrbiting) {
+      stopOrbit();
+    } else {
+      await startOrbit(
+        latitude: latitude,
+        longitude: longitude,
+        altitude: altitude,
+      );
+    }
+  }
+
   Future<void> flyTo({
     required double latitude,
     required double longitude,
@@ -486,6 +723,12 @@ class LgService {
     double heading = 0,
   }) async {
     if (_client == null) throw Exception('Not connected');
+
+    stopOrbit();
+
+    _lastFlyToLat = latitude;
+    _lastFlyToLon = longitude;
+    _lastFlyToAlt = altitude;
 
     final lookAtKml =
         'flytoview=<LookAt>'
@@ -499,6 +742,42 @@ class LgService {
         '</LookAt>';
 
     await execute("echo '$lookAtKml' > $_queryFile");
+  }
+
+  DateTime? _lastFlyToTime;
+
+  static double zoomToAltitude(double zoom, double latitude) {
+    final clampedZoom = zoom.clamp(1.0, 20.0);
+    final latRad = latitude * math.pi / 180.0;
+    final metersPerPixel = (156543.03392 * math.cos(latRad)) / math.pow(2, clampedZoom);
+    final alt = metersPerPixel * 800.0 * 1.2;
+    return alt.clamp(100.0, 20000000.0);
+  }
+
+  Future<void> flyToThrottled({
+    required double latitude,
+    required double longitude,
+    required double zoom,
+    double tilt = _default3DTilt,
+    double heading = 0,
+  }) async {
+    if (!_state.isConnected || _client == null) return;
+    final now = DateTime.now();
+    if (_lastFlyToTime != null &&
+        now.difference(_lastFlyToTime!).inMilliseconds < 120) {
+      return;
+    }
+    _lastFlyToTime = now;
+    final altitude = zoomToAltitude(zoom, latitude);
+    try {
+      await flyTo(
+        latitude: latitude,
+        longitude: longitude,
+        altitude: altitude,
+        tilt: tilt,
+        heading: heading,
+      );
+    } catch (_) {}
   }
 
   Future<void> clearKml() async {
@@ -685,23 +964,25 @@ class LgService {
     return dir;
   }
 
-  // Bump this whenever _generateKml() / _buildKmlString() / any polygon
-  // builder changes. It's baked into the cache filename below, so old
-  // cached files (built by the previous generator logic) are automatically
-  // ignored and regenerated — no manual clearCache() call needed. This is
-  // what was silently serving up the old self-intersecting-star KML even
-  // after the generator code itself was fixed: the 24h on-disk cache had
-  // no way to know the *logic* behind it had changed, only that the file
-  // wasn't old yet.
-  static const int _kmlCacheVersion = 7;
+  // Increment to invalidate cached KML files when generator logic changes
+  static const int _kmlCacheVersion = 14;
 
   Future<String> buildKml({
     required ClimateRegion region,
     required ClimateEra era,
     String? noaaApiKey,
   }) async {
+    final year = int.tryParse(era.label) ?? 2026;
+    return buildKmlForYear(region: region, year: year, noaaApiKey: noaaApiKey);
+  }
+
+  Future<String> buildKmlForYear({
+    required ClimateRegion region,
+    required int year,
+    String? noaaApiKey,
+  }) async {
     final filename =
-        '${region.id}_${era.label}_${region.category}_v$_kmlCacheVersion.kml';
+        '${region.id}_year_${year}_${region.category}_v$_kmlCacheVersion.kml';
     final dir = await _localKmlDir;
     final file = File('${dir.path}/$filename');
 
@@ -709,6 +990,10 @@ class LgService {
       final age = DateTime.now().difference(file.lastModifiedSync());
       if (age.inHours < 24) return file.path;
     }
+
+    final era = year <= 1949
+        ? ClimateEra.preindustrial1900
+        : (year >= 2076 ? ClimateEra.projected2100 : ClimateEra.present2026);
 
     final kml = await _generateKml(region: region, era: era, noaaApiKey: noaaApiKey);
     await file.writeAsString(kml, encoding: utf8);
@@ -727,9 +1012,6 @@ class LgService {
     }
   }
 
-  // ─────────────────────────────────────────────
-  // Private Helper Methods
-  // ─────────────────────────────────────────────
 
   Future<String> _generateKml({
     required ClimateRegion region,
@@ -758,12 +1040,7 @@ class LgService {
     );
   }
 
-  // Half-width/height (in degrees) of the regional box requested from GIBS
-  // and used for the on-screen GroundOverlay. Was previously hardcoded to
-  // the whole globe (-180,-90,180,90), which both wasted resolution
-  // (a 1024x512 image stretched across the entire Earth is a handful of
-  // pixels per region) and covered every screen with the same full-planet
-  // image regardless of which region was selected.
+  // Size of regional box in degrees
   static const double _overlayDegreeOffset = 2.0;
 
   String _buildGibsOverlayUrl(
@@ -793,9 +1070,7 @@ class LgService {
         '&BBOX=$west,$south,$east,$north'
         '&TRANSPARENT=TRUE'
         '&TIME=$date';
-    // KML/XML does not allow a bare "&" — it must be escaped as "&amp;" or
-    // the parser aborts the ENTIRE document (not just this overlay), which
-    // is why nothing renders on the rig even though the file uploads fine.
+    // Ampersands must be escaped as &amp; in KML
     return url.replaceAll('&', '&amp;');
   }
 
@@ -865,9 +1140,7 @@ class LgService {
     final host = _state.ipAddress ?? 'localhost';
     final port = _state.webPort;
 
-    final pastDesc = regionData?.description[1900] ?? '';
-    final nowDesc = regionData?.description[2026] ?? '';
-    final futureDesc = regionData?.description[2100] ?? '';
+
 
     final pastTemp = regionData?.localTempAnomaly[1900] ?? 0.0;
     final nowTemp = regionData?.localTempAnomaly[2026] ?? 0.0;
@@ -944,7 +1217,7 @@ class LgService {
       <overlayXY x="0" y="1" xunits="fraction" yunits="fraction"/>
       <screenXY x="0.02" y="0.95" xunits="fraction" yunits="fraction"/>
       <rotationXY x="0" y="0" xunits="fraction" yunits="fraction"/>
-      <size x="240" y="100" xunits="pixels" yunits="pixels"/>
+      <size x="180" y="180" xunits="pixels" yunits="pixels"/>
     </ScreenOverlay>
 
     <!-- Screen 5 Overlay: Environmental Index Legend -->
@@ -983,9 +1256,11 @@ class LgService {
     <Placemark>
       <name>${LG3DVisuals.escapeXmlText(region.name)}</name>
       <visibility>1</visibility>
+      <gx:balloonVisibility>1</gx:balloonVisibility>
       <styleUrl>#customBalloon</styleUrl>
       <description><![CDATA[
         <div style='font-family:Helvetica,Arial,sans-serif;max-width:420px'>
+        <img src='${region.imageUrl}' style='width:100%;max-height:180px;object-fit:cover;border-radius:8px;margin-bottom:10px;' />
         <h3 style='color:#3498db;margin:0 0 6px'>${region.name} \u2014 Climate Timeline</h3>
         <p style='color:#95a5a6;font-size:12px;margin:0 0 10px'>How climate has changed from 1900 to projected 2100</p>
         <table style='border-collapse:collapse;width:100%;font-size:13px'>
@@ -1044,20 +1319,14 @@ class LgService {
 </kml>''';
   }
 
-  // Traffic-light severity colors used consistently across every category:
-  // green = 1900 baseline (good), yellow/amber = present (moderate),
-  // red = projected future (worst). Previously each category had its own
-  // fixed hue (blue for heat/sea level, icy-blue for glacier, green for
-  // forest) and only OPACITY changed with era — so the timeline never
-  // visually read as "improving vs worsening," just "more/less see-through."
+  // Traffic-light severity colors used consistently across categories
   String _severityColorRgb(ClimateEra era) => switch (era) {
-    ClimateEra.preindustrial1900 => '22c55e', // green — good
-    ClimateEra.present2026       => 'facc15', // yellow — moderate
-    ClimateEra.projected2100     => 'ef4444', // red — worst
+    ClimateEra.preindustrial1900 => '22c55e',
+    ClimateEra.present2026       => 'facc15',
+    ClimateEra.projected2100     => 'ef4444',
   };
 
-  /// Converts alpha (2 hex chars) + a normal "RRGGBB" color into KML's
-  /// required "AABBGGRR" ordering.
+  // Converts alpha + RRGGBB into KML's required AABBGGRR ordering
   String _kmlColorAbgr(String alphaHex, String rrggbb) {
     final rr = rrggbb.substring(0, 2);
     final gg = rrggbb.substring(2, 4);
@@ -1065,9 +1334,7 @@ class LgService {
     return '$alphaHex$bb$gg$rr';
   }
 
-  /// Short, plain-language blurb shown in each polygon's info balloon so
-  /// tapping/clicking a shape actually tells the user something, instead
-  /// of just a bare "Extreme Heat Area — 2100" name with no context.
+  // Returns a description blurb for a polygon's info balloon
   String _severityBlurb(String category, ClimateEra era, Map<String, String> eraStats) {
     final trend = switch (era) {
       ClimateEra.preindustrial1900 => 'Pre-industrial baseline — before major human-driven warming.',
@@ -1096,9 +1363,7 @@ class LgService {
     buffer.writeln('<Folder><name>${LG3DVisuals.escapeXmlText(region.name)} Progression</name>');
     buffer.writeln('<visibility>1</visibility><open>1</open>');
 
-    // Each era is wrapped in its own Folder with a <TimeSpan> so that
-    // Google Earth's built-in timeline slider shows/hides era geometry
-    // and data labels as the user scrubs through time.
+    // Build sub-folders per era with TimeSpan for timeline control
     for (final e in ClimateEra.values) {
       final eraStats = _getEraStats(regionData, region.category, int.parse(e.label));
 
@@ -1931,7 +2196,7 @@ class LG3DVisuals {
         centerLon: hsLon,
         spanDeg: pSpan,
         heightMeters: peakHeight,
-        face1ColorAbgr: 'ff202020', // Dark metallic obsidian spike
+        face1ColorAbgr: 'ff202020',
         face2ColorAbgr: 'ff383838',
         face3ColorAbgr: 'ff151515',
         face4ColorAbgr: 'ff484848',
@@ -1945,11 +2210,11 @@ class LG3DVisuals {
   }
 
   static String _getMeshColorAbgr(String category, double severity) {
-    if (severity < 0.25) return '8833cc44'; // Good (Emerald Green)
-    if (severity < 0.45) return '8855ddaa'; // Fair (Yellow-Green)
-    if (severity < 0.65) return '8800ddee'; // Moderate (Golden Yellow)
-    if (severity < 0.82) return '880088ff'; // Poor (Orange)
-    return '880000ff';                       // Very Poor (Deep Red)
+    if (severity < 0.25) return '8833cc44';
+    if (severity < 0.45) return '8855ddaa';
+    if (severity < 0.65) return '8800ddee';
+    if (severity < 0.82) return '880088ff';
+    return '880000ff';
   }
 
   static String _getWireframeColorAbgr(String category, double severity) {

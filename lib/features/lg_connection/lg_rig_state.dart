@@ -11,6 +11,7 @@ class LGRigState {
   final int? latencyMs;
   final String? currentKml;
   final String? errorMessage;
+  final bool isOrbiting;
 
   const LGRigState({
     this.status = LGConnectionStatus.disconnected,
@@ -21,6 +22,7 @@ class LGRigState {
     this.latencyMs,
     this.currentKml,
     this.errorMessage,
+    this.isOrbiting = false,
   });
 
   bool get isConnected => status == LGConnectionStatus.connected;
@@ -34,6 +36,7 @@ class LGRigState {
     int? latencyMs,
     Object? currentKml = _sentinel,
     Object? errorMessage = _sentinel,
+    bool? isOrbiting,
   }) {
     return LGRigState(
       status: status ?? this.status,
@@ -44,6 +47,7 @@ class LGRigState {
       latencyMs: latencyMs ?? this.latencyMs,
       currentKml: currentKml == _sentinel ? this.currentKml : currentKml as String?,
       errorMessage: errorMessage == _sentinel ? this.errorMessage : errorMessage as String?,
+      isOrbiting: isOrbiting ?? this.isOrbiting,
     );
   }
 

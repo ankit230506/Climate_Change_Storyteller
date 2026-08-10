@@ -8,7 +8,10 @@ class SecureStorageService {
   static final SecureStorageService instance = SecureStorageService._();
 
   static const _storage = FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    aOptions: AndroidOptions(
+      encryptedSharedPreferences: true,
+      resetOnError: true,
+    ),
   );
 
   // ── Key names ────────────────────────────────────────────────────────────
@@ -36,14 +39,34 @@ class SecureStorageService {
   Future<String?> getThemeMode() => _storage.read(key: _kThemeMode);
 
   // ── Gemini API key (required) ────────────────────────────────────────────
-  Future<void> saveGeminiKey(String key) =>
-      _storage.write(key: _kGeminiKey, value: key.trim());
+  Future<void> saveGeminiKey(String key) async {
+    try {
+      await _storage.write(key: _kGeminiKey, value: key.trim());
+    } catch (_) {}
+  }
 
-  Future<String?> getGeminiKey() => _storage.read(key: _kGeminiKey);
+  Future<String?> getGeminiKey() async {
+    try {
+      final key = await _storage.read(key: _kGeminiKey);
+      return key?.trim();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> deleteGeminiKey() async {
+    try {
+      await _storage.delete(key: _kGeminiKey);
+    } catch (_) {}
+  }
 
   Future<bool> hasGeminiKey() async {
-    final k = await getGeminiKey();
-    return k != null && k.isNotEmpty;
+    try {
+      final k = await getGeminiKey();
+      return k != null && k.trim().isNotEmpty;
+    } catch (_) {
+      return false;
+    }
   }
 
   // ── NOAA API key (optional — free, register at ncei.noaa.gov) ───────────
@@ -51,6 +74,8 @@ class SecureStorageService {
       _storage.write(key: _kNoaaKey, value: key.trim());
 
   Future<String?> getNoaaKey() => _storage.read(key: _kNoaaKey);
+
+  Future<void> deleteNoaaKey() => _storage.delete(key: _kNoaaKey);
 
   // ── LG rig connection details ────────────────────────────────────────────
   Future<void> saveLgCredentials({

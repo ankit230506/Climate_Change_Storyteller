@@ -12,16 +12,14 @@ class LGOverlays {
     const height = 120;
     final pixels = Uint8List(width * height * 4);
 
-    // Background: Dark semi-transparent card (20, 24, 38, 220)
     _fillRect(pixels, width, height, 0, 0, width, height, 20, 24, 38, 220);
     _drawRectBorder(pixels, width, height, 0, 0, width, height, 60, 70, 95, 255, 2);
 
-    // Draw 4 Arch Bars (Green, Yellow, Orange, Blue)
     final colors = [
-      [46, 204, 113],  // Green
-      [241, 196, 15],  // Yellow
-      [230, 126, 34],  // Orange
-      [52, 152, 219],  // Blue
+      [46, 204, 113],
+      [241, 196, 15],
+      [230, 126, 34],
+      [52, 152, 219],
     ];
 
     for (int i = 0; i < 4; i++) {
@@ -33,12 +31,8 @@ class LGOverlays {
       _fillRoundedRect(pixels, width, height, x, y, w, h, 6, c[0], c[1], c[2], 255);
     }
 
-    // Draw "liquid galaxy" text pixels
-    // "liquid" (white)
     _drawSimpleText(pixels, width, height, "LIQUID", 120, 22, 255, 255, 255, 255, scale: 3);
-    // "galaxy" (light blue)
     _drawSimpleText(pixels, width, height, "GALAXY", 120, 54, 100, 180, 255, 255, scale: 3);
-    // Tagline "Climate Storyteller"
     _drawSimpleText(pixels, width, height, "CLIMATE STORYTELLER", 20, 88, 160, 175, 200, 255, scale: 1);
 
     return _encodePng(pixels, width, height);
@@ -54,7 +48,6 @@ class LGOverlays {
     final height = (stats != null && stats.isNotEmpty) ? 380 : 280;
     final pixels = Uint8List(width * height * 4);
 
-    // Background: Dark semi-transparent card
     _fillRect(pixels, width, height, 0, 0, width, height, 15, 18, 30, 230);
     _drawRectBorder(pixels, width, height, 0, 0, width, height, 50, 65, 90, 255, 2);
 
@@ -69,10 +62,6 @@ class LGOverlays {
 
     if (eraLabel != null && eraLabel.isNotEmpty) {
       title = '$title ($eraLabel)';
-    }
-
-    if (stats != null && stats.isNotEmpty) {
-      title = '$title'; // Keep era in title, but let's add a "PAST -> NOW -> FUTURE" header in the key data section later
     }
 
     final items = switch (category) {
@@ -104,7 +93,7 @@ class LGOverlays {
         {'label': 'Rapid Loss',            'r': 230, 'g': 126, 'b': 34},
         {'label': 'Severe Loss',           'r': 231, 'g': 76,  'b': 60},
       ],
-      _ => [ // heat
+      _ => [
         {'label': 'Normal (+0°C)',         'r': 46,  'g': 204, 'b': 113},
         {'label': 'Mild (+1.5°C)',         'r': 241, 'g': 196, 'b': 15},
         {'label': 'Moderate (+2.5°C)',     'r': 230, 'g': 126, 'b': 34},
@@ -113,11 +102,9 @@ class LGOverlays {
       ],
     };
 
-    // Header Title
     _drawSimpleText(pixels, width, height, title, 16, 16, 255, 255, 255, 255, scale: 1);
     _drawLine(pixels, width, height, 16, 36, width - 16, 36, 60, 75, 105, 255, 1);
 
-    // Items
     for (int i = 0; i < items.length; i++) {
       final item = items[i];
       final y = 48 + i * 44;
@@ -126,15 +113,12 @@ class LGOverlays {
       final b = item['b'] as int;
       final label = item['label'] as String;
 
-      // Color Swatch Box
       _fillRoundedRect(pixels, width, height, 18, y, 28, 28, 4, r, g, b, 255);
       _drawRectBorder(pixels, width, height, 18, y, 28, 28, 255, 255, 255, 180, 1);
 
-      // Label Text
       _drawSimpleText(pixels, width, height, label, 56, y + 8, 225, 235, 245, 255, scale: 1);
     }
 
-    // KEY DATA section
     if (stats != null && stats.isNotEmpty) {
       _drawLine(pixels, width, height, 16, 260, width - 16, 260, 60, 75, 105, 255, 1);
       _drawSimpleText(pixels, width, height, 'KEY DATA (PAST -> NOW -> FUTURE)', 16, 270, 255, 255, 255, 255, scale: 1);
@@ -153,7 +137,6 @@ class LGOverlays {
       }
     }
 
-    // Source Attribution
     _drawSimpleText(
       pixels, width, height,
       'Source: IPCC AR6 SSP3-7.0',

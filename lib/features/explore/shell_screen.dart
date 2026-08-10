@@ -272,6 +272,60 @@ class _AppNavigationDrawer extends StatelessWidget {
 
                 Divider(color: colors.cardBorder, height: 1),
 
+                // Remove KML Action Tile in Sidebar
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  child: Material(
+                    color: Colors.transparent,
+                    borderRadius: BorderRadius.circular(14),
+                    child: ListTile(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      tileColor: AppColors.critical.withValues(alpha: 0.1),
+                      leading: const Icon(
+                        Icons.layers_clear_outlined,
+                        color: AppColors.critical,
+                        size: 22,
+                      ),
+                      title: Text(
+                        'Remove KML',
+                        style: GoogleFonts.outfit(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.critical,
+                        ),
+                      ),
+                      subtitle: Text(
+                        'Clear active overlays on Liquid Galaxy',
+                        style: GoogleFonts.nunito(
+                          fontSize: 11,
+                          color: colors.textSecondary,
+                        ),
+                      ),
+                      onTap: () async {
+                        Navigator.pop(context); // Close drawer
+                        if (!DI.lgService.state.isConnected) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                            content: Text('Not connected to LG Rig — connect in Settings'),
+                            backgroundColor: AppColors.critical,
+                          ));
+                          return;
+                        }
+                        await DI.lgService.cleanKml();
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                            content: Text('Cleared all KML layers from Liquid Galaxy screens!'),
+                            backgroundColor: AppColors.primary,
+                          ));
+                        }
+                      },
+                    ),
+                  ),
+                ),
+
+                Divider(color: colors.cardBorder, height: 1),
+
                 // Theme Quick Toggle Footer
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),

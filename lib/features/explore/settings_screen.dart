@@ -658,13 +658,13 @@ class SettingsScreen extends StatelessWidget {
                       const SizedBox(height: 10),
                       _buildDetailRow(
                         DI.languageService.translate('about_prog'),
-                        'Google Summer of Code 2026',
+                        'Gemini Summer of Code (GeSoC) 2026',
                         colors,
                       ),
                       const SizedBox(height: 10),
                       _buildDetailRow(
                         DI.languageService.translate('about_sys'),
-                        'Liquid Galaxy (5-Screen Rig)',
+                        'Liquid Galaxy',
                         colors,
                       ),
                       const SizedBox(height: 10),
@@ -736,112 +736,184 @@ class SettingsScreen extends StatelessWidget {
                     DI.languageService.translate('settings_title'),
                     style: AppTypography.heading1,
                   ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Configure Liquid Galaxy connection, themes & options',
+                    style: AppTypography.bodySmall.copyWith(color: colors.textSecondary),
+                  ),
                   const SizedBox(height: 24),
 
-                  // LG connection
+                  // ── Block 1: Liquid Galaxy Connection ──────────────────────────
                   StreamBuilder<LGRigState>(
                     stream: DI.lgService.stateStream,
                     initialData: DI.lgService.state,
                     builder: (context, snap) {
                       final rig = snap.data!;
-                      return Column(children: [
-                        LGStatusCard(rigState: rig,
-                            onTap: () => _openConnect(context)),
-                        const SizedBox(height: 8),
-                        if (rig.isConnected)
-                          OutlinedButton.icon(
-                            onPressed: () async {
-                              await DI.lgService.disconnect();
-                            },
-                            icon: const Icon(Icons.link_off,
-                                size: 18, color: AppColors.critical),
-                            label: Text(DI.languageService.translate('btn_disconnect')),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: AppColors.critical,
-                              side: const BorderSide(
-                                  color: AppColors.critical, width: 1),
+                      return Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: colors.bg1,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: colors.cardBorder, width: 1.2),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.03),
+                              blurRadius: 10,
+                              offset: const Offset(0, 3),
                             ),
-                          )
-                        else
-                          ElevatedButton.icon(
-                            onPressed: () => _openConnect(context),
-                            icon: const Icon(Icons.cable,
-                                size: 18, color: AppColors.bg0),
-                            label: Text(DI.languageService.translate('btn_connect_lg')),
-                          ),
-                      ]);
+                          ],
+                        ),
+                        child: Column(
+                          children: [
+                            LGStatusCard(
+                              rigState: rig,
+                              onTap: () => _openConnect(context),
+                            ),
+                            const SizedBox(height: 12),
+                            if (rig.isConnected)
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: () async {
+                                    await DI.lgService.disconnect();
+                                  },
+                                  icon: const Icon(Icons.link_off,
+                                      size: 18, color: AppColors.critical),
+                                  label: Text(
+                                    DI.languageService.translate('btn_disconnect'),
+                                    style: const TextStyle(color: AppColors.critical),
+                                  ),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: AppColors.critical,
+                                    side: const BorderSide(
+                                        color: AppColors.critical, width: 1),
+                                  ),
+                                ),
+                              )
+                            else
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: () => _openConnect(context),
+                                  icon: const Icon(Icons.cable,
+                                      size: 18, color: Colors.white),
+                                  label: Text(
+                                    DI.languageService.translate('btn_connect_lg'),
+                                    style: const TextStyle(color: Colors.white),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    foregroundColor: Colors.white,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      );
                     },
                   ),
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 24),
 
+                  // ── Section 2: Liquid Galaxy Actions (2 Horizontal Cards) ──
+                  const SectionHeader(title: 'LIQUID GALAXY ACTIONS'),
+                  Row(
+                    children: [
+                      _GridActionCard(
+                        icon: Icons.sync,
+                        title: 'Set up NetworkLink',
+                        subtitle: 'Fix Google Earth sync',
+                        accentColor: AppColors.primary,
+                        onTap: () => _setupNetworkLink(context),
+                      ),
+                      const SizedBox(width: 12),
+                      _GridActionCard(
+                        icon: Icons.build_circle_outlined,
+                        title: DI.languageService.translate('tile_lg_diagnostics'),
+                        subtitle: 'System & port check',
+                        accentColor: AppColors.secondary,
+                        onTap: () => _runDiagnostics(context),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+
+                  // ── Section 3: App Preferences (2 Horizontal Cards) ──
                   SectionHeader(title: DI.languageService.translate('sec_application')),
-                  _Tile(
-                    icon: Icons.language,
-                    title: DI.languageService.translate('tile_language'),
-                    subtitle: currentLang.nativeName,
-                    onTap: () => _showLanguageSelector(context),
-                  ),
-                  _Tile(
-                    icon: Icons.contrast,
-                    title: DI.languageService.translate('tile_theme'),
-                    subtitle: switch (DI.themeService.currentAppThemeMode) {
-                      AppThemeMode.light => DI.languageService.translate('theme_light'),
-                      AppThemeMode.dark => DI.languageService.translate('theme_dark'),
-                      AppThemeMode.system => DI.languageService.translate('theme_system'),
-                    },
-                    onTap: () => _showThemeSelector(context),
-                  ),
-                  _Tile(
-                    icon: Icons.storage_outlined,
-                    title: DI.languageService.translate('tile_data_sources'),
-                    subtitle: 'NASA GIBS, NOAA, IPCC AR6, OpenAQ',
-                    onTap: () => _showDataSourcesModal(context),
-                  ),
-
-                  // KML Cache
-                  _Tile(
-                    icon: Icons.folder_outlined,
-                    title: DI.languageService.translate('tile_kml_cache'),
-                    subtitle: DI.languageService.translate('tile_kml_cache_sub'),
-                    onTap: () => Navigator.push(context,
-                        MaterialPageRoute(
-                            builder: (_) => const KmlCacheScreen())),
-                  ),
-                  // Diagnostics
-                  _Tile(
-                    icon: Icons.build_circle_outlined,
-                    title: DI.languageService.translate('tile_lg_diagnostics'),
-                    subtitle: DI.languageService.translate('tile_lg_diagnostics_sub'),
-                    onTap: () => _runDiagnostics(context),
-                  ),
-                  // Set up NetworkLink (manual re-run, kept as a fallback —
-                  // this now also runs automatically right after connecting)
-                  _Tile(
-                    icon: Icons.sync,
-                    title: 'Set up NetworkLink on LG',
-                    subtitle: 'Fix Google Earth connection / sync configuration',
-                    onTap: () => _setupNetworkLink(context),
+                  Row(
+                    children: [
+                      _GridActionCard(
+                        icon: Icons.language,
+                        title: DI.languageService.translate('tile_language'),
+                        subtitle: currentLang.nativeName,
+                        accentColor: AppColors.primary,
+                        onTap: () => _showLanguageSelector(context),
+                      ),
+                      const SizedBox(width: 12),
+                      _GridActionCard(
+                        icon: Icons.contrast,
+                        title: DI.languageService.translate('tile_theme'),
+                        subtitle: switch (DI.themeService.currentAppThemeMode) {
+                          AppThemeMode.light => DI.languageService.translate('theme_light'),
+                          AppThemeMode.dark => DI.languageService.translate('theme_dark'),
+                          AppThemeMode.system => DI.languageService.translate('theme_system'),
+                        },
+                        accentColor: AppColors.accent,
+                        onTap: () => _showThemeSelector(context),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 20),
 
-                  SectionHeader(title: DI.languageService.translate('sec_api_keys')),
-                  _Tile(
-                    icon: Icons.vpn_key_outlined,
-                    title: DI.languageService.translate('tile_api_setup'),
-                    subtitle: DI.languageService.translate('tile_api_setup_sub'),
-                    onTap: () => Navigator.push(context,
-                        MaterialPageRoute(
-                            builder: (_) => const ApiSetupScreen())),
+                  // ── Section 4: Data & Cache (2 Horizontal Cards) ──
+                  const SectionHeader(title: 'DATA & STORAGE'),
+                  Row(
+                    children: [
+                      _GridActionCard(
+                        icon: Icons.folder_outlined,
+                        title: DI.languageService.translate('tile_kml_cache'),
+                        subtitle: 'Pre-load KML datasets',
+                        accentColor: AppColors.glacier,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const KmlCacheScreen()),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      _GridActionCard(
+                        icon: Icons.vpn_key_outlined,
+                        title: DI.languageService.translate('tile_api_setup'),
+                        subtitle: 'Gemini AI & NOAA keys',
+                        accentColor: AppColors.warning,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const ApiSetupScreen()),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 20),
 
+                  // ── Section 5: Information & Credits (2 Horizontal Cards) ──
                   SectionHeader(title: DI.languageService.translate('sec_about')),
-                  _Tile(
-                    icon: Icons.info_outline,
-                    title: 'Climate Change Storyteller',
-                    subtitle: DI.languageService.translate('tile_about_sub'),
-                    onTap: () => _showAboutDialog(context),
+                  Row(
+                    children: [
+                      _GridActionCard(
+                        icon: Icons.storage_outlined,
+                        title: DI.languageService.translate('tile_data_sources'),
+                        subtitle: 'NASA GIBS, NOAA, IPCC',
+                        accentColor: AppColors.forest,
+                        onTap: () => _showDataSourcesModal(context),
+                      ),
+                      const SizedBox(width: 12),
+                      _GridActionCard(
+                        icon: Icons.info_outline,
+                        title: 'About Storyteller',
+                        subtitle: DI.languageService.translate('tile_about_sub'),
+                        accentColor: AppColors.primary,
+                        onTap: () => _showAboutDialog(context),
+                      ),
+                    ],
                   ),
+
                   const SizedBox(height: 32),
                 ],
               ),
@@ -853,40 +925,89 @@ class SettingsScreen extends StatelessWidget {
   }
 }
 
-class _Tile extends StatelessWidget {
+class _GridActionCard extends StatelessWidget {
   final IconData icon;
-  final String title, subtitle;
+  final String title;
+  final String subtitle;
   final VoidCallback onTap;
+  final Color? accentColor;
 
-  const _Tile({required this.icon, required this.title,
-      required this.subtitle, required this.onTap});
+  const _GridActionCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.accentColor,
+  });
 
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: colors.bg2,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: colors.cardBorder),
-        ),
-        child: Row(children: [
-          Icon(icon, color: colors.textSecondary, size: 22),
-          const SizedBox(width: 14),
-          Expanded(child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: AppTypography.bodyLarge.copyWith(color: colors.textPrimary)),
-              Text(subtitle, style: AppTypography.bodySmall.copyWith(color: colors.textSecondary)),
+    final color = accentColor ?? AppColors.primary;
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          height: 110,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: colors.bg1,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: colors.cardBorder, width: 1.2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.03),
+                blurRadius: 8,
+                offset: const Offset(0, 3),
+              ),
             ],
-          )),
-          Icon(Icons.chevron_right,
-              color: colors.textMuted, size: 20),
-        ]),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(icon, color: color, size: 20),
+                  ),
+                  Icon(Icons.arrow_forward_ios, size: 12, color: colors.textMuted),
+                ],
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTypography.bodyLarge.copyWith(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      color: colors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTypography.bodySmall.copyWith(
+                      fontSize: 11,
+                      color: colors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

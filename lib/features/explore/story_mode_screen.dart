@@ -9,7 +9,6 @@ import 'package:climate_storyteller/features/lg_connection/lg_rig_state.dart';
 import 'package:climate_storyteller/features/explore/climate_region.dart';
 import 'package:climate_storyteller/features/explore/climate_era.dart';
 import 'package:climate_storyteller/features/narrator/narration_result.dart';
-import 'package:audioplayers/audioplayers.dart';
 
 class StoryModeScreen extends StatefulWidget {
   const StoryModeScreen({super.key});
@@ -81,9 +80,7 @@ class _StoryModeScreenState extends State<StoryModeScreen>
   double  _chapterProgress = 0.0;
   int     _completedUpTo  = -1;
 
-  Timer?  _progressTimer;
-  int     _elapsedSeconds = 0;
-  final AudioPlayer _player = AudioPlayer();
+  StreamSubscription<double>? _progressSub;
 
   late final AnimationController _pulseCtrl;
 
@@ -94,27 +91,25 @@ class _StoryModeScreenState extends State<StoryModeScreen>
       vsync: this,
       duration: const Duration(seconds: 2),
     );
+    _progressSub = DI.narratorService.progressStream.listen((progress) {
+      if (mounted && _isPlaying) {
+        setState(() => _chapterProgress = progress.clamp(0.0, 1.0));
+      }
+    });
   }
 
   @override
   void dispose() {
-    _progressTimer?.cancel();
+    _progressSub?.cancel();
     _pulseCtrl.dispose();
-    _player.dispose();
+    DI.narratorService.stop();
     super.dispose();
   }
 
   Future<void> _play() async {
-    if (_elapsedSeconds > 0 && !_isPlaying) {
-      await _player.resume();
-      setState(() { _isPlaying = true; });
-      _pulseCtrl.repeat(reverse: true);
-      _startProgressTimer();
-      return;
-    }
-
-    await _player.stop();
-    setState(() { _isPlaying = true; _isLoading = true; });
+    await DI.narratorService.stop();
+    if (!mounted) return;
+    setState(() { _isPlaying = true; _isLoading = true; _chapterProgress = 0.0; });
     _pulseCtrl.repeat(reverse: true);
 
     final chapter = _chapters[_currentChapter];
@@ -126,69 +121,103 @@ class _StoryModeScreenState extends State<StoryModeScreen>
     try {
       final lg = DI.lgService;
       if (lg.state.isConnected) {
+        if (!mounted) return;
         setState(() => _statusMsg = 'Flying to ${region.name}…');
         await DI.lgService.flyTo(
           latitude:  region.latitude,
           longitude: region.longitude,
           altitude:  region.altitude,
         );
+        if (!mounted) return;
       } else {
+        if (!mounted) return;
         setState(() => _statusMsg =
             '⚠️ LG not connected — running in preview mode');
       }
 
       if (lg.state.isConnected) {
+        if (!mounted) return;
         setState(() => _statusMsg = 'Loading ${chapter.era.label} data…');
         final kmlPath = await DI.lgService.buildKml(
           region: region,
           era:    chapter.era,
         );
+        if (!mounted) return;
         final content = await _readFile(kmlPath);
+        if (!mounted) return;
         await DI.lgService.sendKml(
           '${region.id}_${chapter.era.label}_story.kml',
           kmlContent: content,
         );
+        if (!mounted) return;
       }
 
+      if (!mounted) return;
       setState(() => _statusMsg = 'Generating narration…');
+      final stats = await DI.climateDataService.getStatsForYear(int.parse(chapter.era.label));
       final narration = await DI.narratorService.generateNarration(
         region: region,
         era:    chapter.era,
         style:  VoiceStyle.poetic,
+        stats:  stats,
       );
+      if (!mounted) return;
 
       if (narration.hasError) {
         setState(() {
           _statusMsg = '⚠️ ${narration.errorMessage}';
           _isLoading = false;
+          _isPlaying = false;
         });
-        _startProgressTimer();
+        _pulseCtrl.stop();
         return;
       }
 
-      setState(() => _statusMsg = 'Synthesizing audio…');
       final narrationText = narration.text ?? '';
       if (narrationText.isEmpty) {
         setState(() {
           _statusMsg = '⚠️ No narration text generated';
           _isLoading = false;
+          _isPlaying = false;
         });
-        _startProgressTimer();
+        _pulseCtrl.stop();
         return;
       }
 
-      final mp3Bytes = await DI.narratorService.synthesizeVoice(narrationText, style: VoiceStyle.poetic);
-      if (mp3Bytes != null && mp3Bytes.isNotEmpty) {
-        await _player.play(BytesSource(mp3Bytes));
-        setState(() => _statusMsg = 'Narration playing…');
+      if (!mounted) return;
+      setState(() { _statusMsg = 'Speaking narration…'; _isLoading = false; });
+
+      // Speak using flutter_tts — await completion, progress bar is
+      // driven by the progressStream subscription set up in initState.
+      await DI.narratorService.speak(narrationText, style: VoiceStyle.poetic);
+
+      // TTS completed — mark chapter done and auto-advance
+      if (!mounted || !_isPlaying) return;
+      setState(() {
+        _chapterProgress = 1.0;
+        _completedUpTo   = _currentChapter;
+        _statusMsg       = '✓ Chapter complete';
+      });
+
+      await Future.delayed(const Duration(seconds: 2));
+      if (!mounted || !_isPlaying) return;
+
+      if (_currentChapter < _chapters.length - 1) {
+        setState(() {
+          _currentChapter++;
+          _chapterProgress = 0;
+        });
+        _play();
       } else {
-        setState(() => _statusMsg = 'Narration ready (audio failed)');
+        setState(() {
+          _isPlaying = false;
+          _statusMsg = '🎬 Story complete — all 5 chapters played';
+        });
+        _pulseCtrl.stop();
       }
 
-      setState(() { _isLoading = false; });
-      _startProgressTimer();
-
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isLoading  = false;
         _statusMsg  = 'Error: $e';
@@ -199,24 +228,21 @@ class _StoryModeScreenState extends State<StoryModeScreen>
   }
 
   void _pause() {
-    _progressTimer?.cancel();
     _pulseCtrl.stop();
-    _player.pause();
+    DI.narratorService.stop();
     setState(() {
       _isPlaying = false;
-      _statusMsg = 'Paused — tap Play to continue';
+      _statusMsg = 'Paused — tap Play to resume';
     });
   }
 
   void _goToChapter(int index) {
     if (index < 0 || index >= _chapters.length) return;
     if (index > _completedUpTo + 1 && index > _currentChapter + 1) return;
-    _progressTimer?.cancel();
-    _player.stop();
+    DI.narratorService.stop();
     setState(() {
       _currentChapter  = index;
       _chapterProgress = 0.0;
-      _elapsedSeconds  = 0;
       _isPlaying       = false;
       _statusMsg       = 'Chapter ${index + 1} selected — tap Play';
     });
@@ -232,49 +258,6 @@ class _StoryModeScreenState extends State<StoryModeScreen>
     if (_currentChapter > 0) {
       _goToChapter(_currentChapter - 1);
     }
-  }
-
-  void _startProgressTimer() {
-    _progressTimer?.cancel();
-    final totalSecs = _chapters[_currentChapter]
-        .duration.inSeconds.toDouble();
-
-    _progressTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-      _elapsedSeconds++;
-      final progress = _elapsedSeconds / totalSecs;
-      if (mounted) {
-        setState(() => _chapterProgress = progress.clamp(0.0, 1.0));
-      }
-
-      if (_elapsedSeconds >= totalSecs) {
-        t.cancel();
-        if (mounted) {
-          setState(() {
-            _completedUpTo = _currentChapter;
-            _statusMsg     = '✓ Chapter complete';
-          });
-
-          Future.delayed(const Duration(seconds: 2), () {
-            if (mounted && _isPlaying) {
-              if (_currentChapter < _chapters.length - 1) {
-                setState(() {
-                  _currentChapter++;
-                  _chapterProgress = 0;
-                  _elapsedSeconds  = 0;
-                });
-                _play();
-              } else {
-                setState(() {
-                  _isPlaying = false;
-                  _statusMsg = '🎬 Story complete — all 5 chapters played';
-                });
-                _pulseCtrl.stop();
-              }
-            }
-          });
-        }
-      }
-    });
   }
 
   Future<String> _readFile(String path) async {
@@ -309,7 +292,7 @@ class _StoryModeScreenState extends State<StoryModeScreen>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SizedBox(height: 4),
+              const SizedBox(height: 4),
 
               Row(children: [
                 Expanded(child: Column(
@@ -326,7 +309,7 @@ class _StoryModeScreenState extends State<StoryModeScreen>
                   builder: (_, snap) {
                     final connected = snap.data!.isConnected;
                     return Container(
-                      padding: EdgeInsets.symmetric(
+                      padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
                         color: connected
@@ -349,7 +332,7 @@ class _StoryModeScreenState extends State<StoryModeScreen>
                                 ? AppColors.good
                                 : AppColors.critical,
                           ),
-                          SizedBox(width: 6),
+                          const SizedBox(width: 6),
                           Text(
                             connected ? 'LG Connected' : 'LG Disconnected',
                             style: TextStyle(
@@ -366,7 +349,7 @@ class _StoryModeScreenState extends State<StoryModeScreen>
                   },
                 ),
               ]),
-              SizedBox(height: 24),
+              const SizedBox(height: 24),
 
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -378,7 +361,7 @@ class _StoryModeScreenState extends State<StoryModeScreen>
                   ),
                 ],
               ),
-              SizedBox(height: 24),
+              const SizedBox(height: 24),
 
               _NowPlayingCard(
                 chapter:  chapter,
@@ -409,7 +392,7 @@ class _StoryModeScreenState extends State<StoryModeScreen>
                 borderRadius: BorderRadius.circular(4),
                 child: LinearProgressIndicator(
                   value: (_completedUpTo + 1) / _chapters.length,
-                  backgroundColor: AppColors.bg3,
+                  backgroundColor: colors.bg3,
                   valueColor: const AlwaysStoppedAnimation<Color>(
                       AppColors.primary),
                   minHeight: 6,
@@ -506,30 +489,30 @@ class _NowPlayingCard extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: AppColors.bg3,
+                color: colors.bg3,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
                 statusMsg,
                 style: AppTypography.bodySmall
-                    .copyWith(color: AppColors.textSecondary),
+                    .copyWith(color: colors.textSecondary),
               ),
             ),
           ),
           const SizedBox(height: 16),
 
           Row(children: [
-            Text('Chapter progress', style: AppTypography.caption),
+            Text('Chapter progress', style: AppTypography.caption.copyWith(color: colors.textSecondary)),
             const Spacer(),
             Text('${(progress * 100).toInt()}%',
-                style: AppTypography.caption),
+                style: AppTypography.caption.copyWith(color: colors.textSecondary)),
           ]),
           const SizedBox(height: 6),
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
               value: progress,
-              backgroundColor: AppColors.bg3,
+              backgroundColor: colors.bg3,
               valueColor: AlwaysStoppedAnimation<Color>(chapter.color),
               minHeight: 6,
             ),
@@ -544,7 +527,7 @@ class _NowPlayingCard extends StatelessWidget {
                 icon: Icon(Icons.skip_previous_rounded,
                   size: 32,
                   color: onPrev != null
-                      ? AppColors.textPrimary : AppColors.textMuted),
+                      ? colors.textPrimary : colors.textMuted),
               ),
               const SizedBox(width: 16),
 
@@ -560,7 +543,7 @@ class _NowPlayingCard extends StatelessWidget {
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         color: isLoading
-                            ? AppColors.bg3 : chapter.color,
+                            ? colors.bg3 : chapter.color,
                         boxShadow: isPlaying ? [BoxShadow(
                           color: chapter.color.withValues(alpha: 0.4),
                           blurRadius: 20, spreadRadius: 2,
@@ -577,7 +560,7 @@ class _NowPlayingCard extends StatelessWidget {
                               isPlaying
                                   ? Icons.pause_rounded
                                   : Icons.play_arrow_rounded,
-                              size: 34, color: AppColors.bg0,
+                              size: 34, color: Colors.white,
                             ),
                     ),
                   ),
@@ -591,7 +574,7 @@ class _NowPlayingCard extends StatelessWidget {
                 icon: Icon(Icons.skip_next_rounded,
                   size: 32,
                   color: onNext != null
-                      ? AppColors.textPrimary : AppColors.textMuted),
+                      ? colors.textPrimary : colors.textMuted),
               ),
             ],
           ),
@@ -650,15 +633,15 @@ class _ChapterTile extends StatelessWidget {
                   ? AppColors.good.withValues(alpha: 0.15)
                   : isCurrent
                       ? chapter.color.withValues(alpha: 0.15)
-                      : AppColors.bg3,
+                      : colors.bg3,
             ),
             child: Center(
               child: isDone
                   ? const Icon(Icons.check,
                       size: 18, color: AppColors.good)
                   : isLocked
-                      ? const Icon(Icons.lock_outline,
-                          size: 16, color: AppColors.textMuted)
+                      ? Icon(Icons.lock_outline,
+                          size: 16, color: colors.textMuted)
                       : Text(
                           '${chapter.index + 1}',
                           style: TextStyle(
@@ -666,7 +649,7 @@ class _ChapterTile extends StatelessWidget {
                             fontWeight: FontWeight.w700,
                             color: isCurrent
                                 ? chapter.color
-                                : AppColors.textSecondary,
+                                : colors.textSecondary,
                           ),
                         ),
             ),
@@ -682,12 +665,12 @@ class _ChapterTile extends StatelessWidget {
                   fontWeight: isCurrent
                       ? FontWeight.w700 : FontWeight.w500,
                   color: isLocked
-                      ? AppColors.textMuted : AppColors.textPrimary,
+                      ? colors.textMuted : colors.textPrimary,
                 )),
               const SizedBox(height: 2),
               Text(chapter.subtitle,
-                style: const TextStyle(
-                    fontSize: 12, color: AppColors.textSecondary)),
+                style: TextStyle(
+                    fontSize: 12, color: colors.textSecondary)),
             ],
           )),
 

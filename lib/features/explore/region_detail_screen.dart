@@ -6,6 +6,7 @@ import 'package:climate_storyteller/core/di/injection_container.dart';
 import 'package:climate_storyteller/widgets/shared_widgets.dart';
 import 'climate_region.dart';
 import 'climate_era.dart';
+import 'package:climate_storyteller/features/lg_connection/lg_rig_state.dart';
 
 class RegionDetailScreen extends StatefulWidget {
   final ClimateRegion region;
@@ -177,11 +178,47 @@ class _RegionDetailScreenState extends State<RegionDetailScreen> {
               )),
               const SizedBox(height: 24),
 
+              // 3D Orbit Tour CTA
+              StreamBuilder<LGRigState>(
+                stream: DI.lgService.stateStream,
+                initialData: DI.lgService.state,
+                builder: (context, snapshot) {
+                  final isOrbiting = snapshot.data?.isOrbiting ?? false;
+                  return ElevatedButton.icon(
+                    onPressed: () => DI.lgService.toggleOrbit(
+                      latitude: widget.region.latitude,
+                      longitude: widget.region.longitude,
+                      altitude: widget.region.altitude,
+                    ),
+                    icon: Icon(
+                      isOrbiting ? Icons.stop_circle : Icons.rotate_right,
+                      size: 18,
+                      color: Colors.white,
+                    ),
+                    label: Text(
+                      isOrbiting ? 'Stop 3D Orbit' : '🛸 3D Orbit Tour on LG',
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isOrbiting ? AppColors.critical : AppColors.accent,
+                      foregroundColor: Colors.white,
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 12),
+
               // Fly to CTA
               ElevatedButton.icon(
                 onPressed: _flyToRegion,
-                icon: const Icon(Icons.public, size: 18, color: AppColors.bg0),
-                label: Text('Fly to ${widget.region.name} on LG'),
+                icon: const Icon(Icons.public, size: 18, color: Colors.white),
+                label: Text(
+                  'Fly to ${widget.region.name} on LG',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                style: ElevatedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                ),
               ),
               const SizedBox(height: 32),
             ],
@@ -242,7 +279,7 @@ class _KmlLayerTile extends StatelessWidget {
       _LayerStatus.loaded  => StatusPill.loaded(),
       _LayerStatus.ready   => StatusPill.ready(),
       _LayerStatus.loading => StatusPill.loading(),
-      _LayerStatus.error   => StatusPill(label: 'Error', color: AppColors.critical),
+      _LayerStatus.error   => const StatusPill(label: 'Error', color: AppColors.critical),
     };
 
     return GestureDetector(

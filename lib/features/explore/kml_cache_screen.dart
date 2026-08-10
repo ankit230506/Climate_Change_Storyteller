@@ -108,21 +108,22 @@ class _KmlCacheScreenState extends State<KmlCacheScreen> {
   }
 
   Future<void> _clearCache() async {
+    final colors = AppColors.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: AppColors.bg2,
-        title: const Text('Clear KML Cache',
-            style: TextStyle(color: AppColors.textPrimary)),
-        content: const Text(
+        backgroundColor: colors.bg1,
+        title: Text('Clear KML Cache',
+            style: TextStyle(color: colors.textPrimary)),
+        content: Text(
           'Delete all $_totalFiles cached KML files?\n'
           'You\'ll need to re-download them for offline use.',
-          style: TextStyle(color: AppColors.textSecondary)),
+          style: TextStyle(color: colors.textSecondary)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel',
-                style: TextStyle(color: AppColors.textSecondary))),
+            child: Text('Cancel',
+                style: TextStyle(color: colors.textSecondary))),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Clear',
@@ -138,9 +139,9 @@ class _KmlCacheScreenState extends State<KmlCacheScreen> {
     setState(() { _cacheSize = 0; _cachedCount = 0; });
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Cache cleared'),
-        backgroundColor: AppColors.bg2,
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('Cache cleared'),
+        backgroundColor: colors.bg2,
       ));
     }
   }
@@ -153,13 +154,14 @@ class _KmlCacheScreenState extends State<KmlCacheScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
     final progress = _cachedCount / _totalFiles;
 
     return Scaffold(
-      backgroundColor: AppColors.bg0,
+      backgroundColor: colors.bg0,
       appBar: AppBar(
-        title: const Text('KML Cache'),
-        backgroundColor: AppColors.bg0,
+        title: Text('KML Cache', style: TextStyle(color: colors.textPrimary)),
+        backgroundColor: colors.bg0,
         actions: [
           if (_cachedCount > 0)
             IconButton(
@@ -179,9 +181,9 @@ class _KmlCacheScreenState extends State<KmlCacheScreen> {
               Container(
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
-                  color: AppColors.bg2,
+                  color: colors.bg1,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFF1E2235)),
+                  border: Border.all(color: colors.cardBorder),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -190,13 +192,13 @@ class _KmlCacheScreenState extends State<KmlCacheScreen> {
                       const Icon(Icons.folder_outlined,
                           color: AppColors.primary, size: 22),
                       const SizedBox(width: 10),
-                      const Text('Offline KML Cache',
+                      Text('Offline KML Cache',
                         style: TextStyle(
                           fontSize: 15, fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimary)),
+                          color: colors.textPrimary)),
                       const Spacer(),
                       Text(_formatBytes(_cacheSize),
-                        style: AppTypography.caption),
+                        style: AppTypography.caption.copyWith(color: colors.textSecondary)),
                     ]),
                     const SizedBox(height: 14),
 
@@ -206,7 +208,7 @@ class _KmlCacheScreenState extends State<KmlCacheScreen> {
                           borderRadius: BorderRadius.circular(4),
                           child: LinearProgressIndicator(
                             value: progress,
-                            backgroundColor: AppColors.bg3,
+                            backgroundColor: colors.bg3,
                             valueColor: AlwaysStoppedAnimation<Color>(
                               progress == 1.0
                                   ? AppColors.good
@@ -231,7 +233,7 @@ class _KmlCacheScreenState extends State<KmlCacheScreen> {
                           : '${_totalFiles - _cachedCount} files remaining',
                       style: AppTypography.bodySmall.copyWith(
                         color: progress == 1.0
-                            ? AppColors.good : AppColors.textSecondary),
+                            ? AppColors.good : colors.textSecondary),
                     ),
                   ],
                 ),
@@ -245,14 +247,20 @@ class _KmlCacheScreenState extends State<KmlCacheScreen> {
                 icon: _isDownloadingAll
                     ? const SizedBox(width: 18, height: 18,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: AppColors.bg0))
+                            strokeWidth: 2, color: Colors.white))
                     : const Icon(Icons.download,
-                        size: 18, color: AppColors.bg0),
-                label: Text(_isDownloadingAll
-                    ? 'Downloading… $_cachedCount/$_totalFiles'
-                    : _cachedCount == _totalFiles
-                        ? 'All Files Cached ✓'
-                        : 'Download All $_totalFiles KML Files'),
+                        size: 18, color: Colors.white),
+                label: Text(
+                  _isDownloadingAll
+                      ? 'Downloading… $_cachedCount/$_totalFiles'
+                      : _cachedCount == _totalFiles
+                          ? 'All Files Cached ✓'
+                          : 'Download All $_totalFiles KML Files',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                style: ElevatedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                ),
               ),
               const SizedBox(height: 24),
 
@@ -264,7 +272,7 @@ class _KmlCacheScreenState extends State<KmlCacheScreen> {
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Text(
                       region.name.toUpperCase(),
-                      style: AppTypography.caption,
+                      style: AppTypography.caption.copyWith(color: colors.textSecondary),
                     ),
                   ),
 
@@ -283,12 +291,12 @@ class _KmlCacheScreenState extends State<KmlCacheScreen> {
                       decoration: BoxDecoration(
                         color: status == _KmlStatus.cached
                             ? AppColors.good.withValues(alpha: 0.05)
-                            : AppColors.bg2,
+                            : colors.bg2,
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
                           color: status == _KmlStatus.cached
                               ? AppColors.good.withValues(alpha: 0.3)
-                              : const Color(0xFF1E2235),
+                              : colors.cardBorder,
                         ),
                       ),
                       child: Row(children: [
@@ -300,15 +308,15 @@ class _KmlCacheScreenState extends State<KmlCacheScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(filename,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 12,
                                   fontFamily: 'monospace',
-                                  color: AppColors.textPrimary,
+                                  color: colors.textPrimary,
                                 )),
                               Text(
                                 '${era.subtitle} · ${region.category}',
                                 style: AppTypography.caption
-                                    .copyWith(letterSpacing: 0)),
+                                    .copyWith(letterSpacing: 0, color: colors.textSecondary)),
                             ],
                           ),
                         ),

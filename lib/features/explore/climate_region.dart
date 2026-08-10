@@ -14,6 +14,8 @@ class ClimateRegion {
   final double bboxSouth;
   final double bboxEast;
   final double bboxWest;
+  final String imageUrl;
+  final String description;
 
   const ClimateRegion({
     required this.id,
@@ -28,6 +30,8 @@ class ClimateRegion {
     required this.bboxSouth,
     required this.bboxEast,
     required this.bboxWest,
+    required this.imageUrl,
+    required this.description,
   });
 }
 
@@ -39,7 +43,7 @@ const List<ClimateRegion> kDefaultRegions = [
     category: 'glacier',
     latitude: 78.2232,
     longitude: 15.6267,
-    altitude: 50000,
+    altitude: 180000,
     riskLevel: 'Critical',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'arctic_1900_glacier.kml',
@@ -50,6 +54,8 @@ const List<ClimateRegion> kDefaultRegions = [
     bboxSouth: 65.0,
     bboxEast: 60.0,
     bboxWest: -30.0,
+    imageUrl: 'https://images.unsplash.com/photo-1517411032315-54ef2cb783bb?w=600&q=80',
+    description: 'Rapid Arctic sea ice decline & glacial retreat. The Arctic is warming nearly 4x faster than the global average.',
   ),
   ClimateRegion(
     id: 'himalaya',
@@ -57,7 +63,7 @@ const List<ClimateRegion> kDefaultRegions = [
     category: 'glacier',
     latitude: 27.9881,
     longitude: 86.9250,
-    altitude: 45000,
+    altitude: 160000,
     riskLevel: 'High',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'himalaya_1900_glacier.kml',
@@ -68,6 +74,8 @@ const List<ClimateRegion> kDefaultRegions = [
     bboxSouth: 26.0,
     bboxEast: 100.0,
     bboxWest: 72.0,
+    imageUrl: 'https://images.unsplash.com/photo-1589182373726-e4f658ab50f0?w=600&q=80',
+    description: 'Third Pole glacier melting threatens freshwater security for over 1.3 billion people across South Asia.',
   ),
   ClimateRegion(
     id: 'amazon',
@@ -75,7 +83,7 @@ const List<ClimateRegion> kDefaultRegions = [
     category: 'forest',
     latitude: -3.4653,
     longitude: -62.2159,
-    altitude: 65000,
+    altitude: 220000,
     riskLevel: 'Critical',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'amazon_1900_forest.kml',
@@ -86,6 +94,8 @@ const List<ClimateRegion> kDefaultRegions = [
     bboxSouth: -20.0,
     bboxEast: -44.0,
     bboxWest: -80.0,
+    imageUrl: 'https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?w=600&q=80',
+    description: 'Accelerated tropical deforestation and severe droughts risk pushing the Amazon rainforest past its ecological tipping point.',
   ),
   ClimateRegion(
     id: 'pacific',
@@ -93,7 +103,7 @@ const List<ClimateRegion> kDefaultRegions = [
     category: 'sealevel',
     latitude: -8.7832,
     longitude: 179.0000,
-    altitude: 30000,
+    altitude: 200000,
     riskLevel: 'Critical',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'pacific_1900_sealevel.kml',
@@ -104,6 +114,8 @@ const List<ClimateRegion> kDefaultRegions = [
     bboxSouth: -18.0,
     bboxEast: -168.0,
     bboxWest: 165.0,
+    imageUrl: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=600&q=80',
+    description: 'Low-lying island nations facing existential threats from accelerated sea level rise, saltwater intrusion, and king tides.',
   ),
   ClimateRegion(
     id: 'sahara',
@@ -111,7 +123,7 @@ const List<ClimateRegion> kDefaultRegions = [
     category: 'heat',
     latitude: 23.4162,
     longitude: 25.6628,
-    altitude: 65000,
+    altitude: 220000,
     riskLevel: 'High',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'sahara_1900_heat.kml',
@@ -122,6 +134,8 @@ const List<ClimateRegion> kDefaultRegions = [
     bboxSouth: 15.0,
     bboxEast: 35.0,
     bboxWest: -17.0,
+    imageUrl: 'https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?w=600&q=80',
+    description: 'Desertification expanding south into the Sahel belt, driving record heatwaves and displacement.',
   ),
   ClimateRegion(
     id: 'maldives',
@@ -129,7 +143,7 @@ const List<ClimateRegion> kDefaultRegions = [
     category: 'sealevel',
     latitude: 3.2028,
     longitude: 73.2207,
-    altitude: 25000,
+    altitude: 90000,
     riskLevel: 'Critical',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'maldives_1900_sealevel.kml',
@@ -140,15 +154,9 @@ const List<ClimateRegion> kDefaultRegions = [
     bboxSouth: -1.0,
     bboxEast: 74.5,
     bboxWest: 72.0,
+    imageUrl: 'https://images.unsplash.com/photo-1514282401047-d79a71a590e8?w=600&q=80',
+    description: 'The world\'s lowest-lying nation where over 80% of coral islands sit less than 1 meter above sea level.',
   ),
-  // AQI category existed in the KML-generation backend (GIBS aerosol
-  // layer, colored haze-zone polygon, legend/overlay assets) but had NO
-  // entry anywhere in this region list — so there was no chip in the
-  // Timeline screen's region selector that could ever produce
-  // region.category == 'aqi'. Delhi is a globally recognized, severe and
-  // worsening air-quality case, making it a natural fit for the
-  // 1900 (green/clean) → 2026 (yellow/moderate) → 2100 (red/hazardous)
-  // storytelling arc the rest of the app already uses.
   ClimateRegion(
     id: 'delhi',
     name: 'Delhi NCR',
@@ -166,5 +174,7 @@ const List<ClimateRegion> kDefaultRegions = [
     bboxSouth: 27.5,
     bboxEast: 78.5,
     bboxWest: 76.0,
+    imageUrl: 'https://images.unsplash.com/photo-1587474260584-136574528ed5?w=600&q=80',
+    description: 'Severe urban heat island effects and dangerous air quality index levels impacting tens of millions.',
   ),
 ];

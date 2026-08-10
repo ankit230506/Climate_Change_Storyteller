@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:audioplayers/audioplayers.dart';
 import 'dart:math' as math;
 import 'package:climate_storyteller/core/constant/app_theme.dart';
 import 'package:climate_storyteller/core/storage/secure_storage_service.dart';
@@ -9,6 +8,7 @@ import 'package:climate_storyteller/features/explore/climate_region.dart';
 import 'package:climate_storyteller/features/explore/climate_era.dart';
 import 'package:climate_storyteller/features/narrator/narration_result.dart';
 import 'package:climate_storyteller/core/localization/language_service.dart';
+import 'package:climate_storyteller/features/explore/api_setup_screen.dart';
 
 class NarratorScreen extends StatefulWidget {
   const NarratorScreen({super.key});
@@ -27,13 +27,7 @@ class _NarratorScreenState extends State<NarratorScreen>
   bool          _isLoading = false;
   String?       _narrationText;
   String?       _errorMsg;
-  double        _progress  = 0.0;
-  Duration      _total     = Duration.zero;
-  Duration      _position  = Duration.zero;
   bool          _hasApiKey = false;
-
-  // ── Audio player ──────────────────────────────────────────────────────────
-  final AudioPlayer _player = AudioPlayer();
 
   // ── Waveform animation ────────────────────────────────────────────────────
   late final AnimationController _waveCtrl;
@@ -46,7 +40,6 @@ class _NarratorScreenState extends State<NarratorScreen>
       duration: const Duration(seconds: 2),
     );
     _checkApiKey();
-    _setupAudioListeners();
   }
 
   Future<void> _checkApiKey() async {
@@ -54,39 +47,24 @@ class _NarratorScreenState extends State<NarratorScreen>
     if (mounted) setState(() => _hasApiKey = has);
   }
 
-  void _setupAudioListeners() {
-    _player.onPositionChanged.listen((pos) {
-      if (mounted) {
-        setState(() {
-        _position = pos;
-        _progress = _total.inMilliseconds > 0
-            ? pos.inMilliseconds / _total.inMilliseconds
-            : 0;
-      });
-      }
-    });
-
-    _player.onDurationChanged.listen((dur) {
-      if (mounted) setState(() => _total = dur);
-    });
-
-    _player.onPlayerComplete.listen((_) {
-      if (mounted) {
-        setState(() { _isPlaying = false; _progress = 0; });
-        _waveCtrl.stop();
-        _waveCtrl.reset();
-      }
-    });
+  Future<void> _openApiSetup() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ApiSetupScreen()),
+    );
+    await _checkApiKey();
   }
 
   @override
   void dispose() {
     _waveCtrl.dispose();
-    _player.dispose();
+    DI.narratorService.stop();
     super.dispose();
   }
 
   Future<void> _generateAndPlay() async {
+    await _checkApiKey();
+
     if (!_hasApiKey) {
       _showNoKeyDialog();
       return;
@@ -106,6 +84,8 @@ class _NarratorScreenState extends State<NarratorScreen>
         style:  _style,
       );
 
+      if (!mounted) return;
+
       if (result.hasError) {
         setState(() { _errorMsg = result.errorMessage; _isLoading = false; });
         return;
@@ -113,27 +93,38 @@ class _NarratorScreenState extends State<NarratorScreen>
 
       setState(() => _narrationText = result.text);
 
-      // Step 2: Convert text to MP3 via TTS Service
-      final mp3Bytes = await DI.narratorService.synthesizeVoice(result.text!, style: _style);
-
-      if (mp3Bytes == null || mp3Bytes.isEmpty) {
+      final narrationText = result.text ?? '';
+      if (narrationText.isEmpty) {
         setState(() {
-          _errorMsg = 'TTS failed — text generated but audio unavailable';
+          _errorMsg = 'No narration text generated';
           _isLoading = false;
         });
         return;
       }
 
-      // Step 3: Play the MP3
-      await _player.play(BytesSource(mp3Bytes));
-      _waveCtrl.repeat();
+      // Step 2: Speak using flutter_tts
       setState(() { _isPlaying = true; _isLoading = false; });
+      _waveCtrl.repeat();
+
+      await DI.narratorService.speak(narrationText, style: _style);
+
+      // TTS completed
+      if (mounted) {
+        setState(() { _isPlaying = false; });
+        _waveCtrl.stop();
+        _waveCtrl.reset();
+      }
 
     } catch (e) {
-      setState(() {
-        _errorMsg = 'Error: $e';
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _errorMsg = 'Error: $e';
+          _isLoading = false;
+          _isPlaying = false;
+        });
+        _waveCtrl.stop();
+        _waveCtrl.reset();
+      }
     }
   }
 
@@ -146,13 +137,37 @@ class _NarratorScreenState extends State<NarratorScreen>
     }
 
     if (_isPlaying) {
-      await _player.pause();
+      await DI.narratorService.pause();
       _waveCtrl.stop();
       setState(() => _isPlaying = false);
     } else {
-      await _player.resume();
-      _waveCtrl.repeat();
+      // Re-speak the narration text from beginning
       setState(() => _isPlaying = true);
+      _waveCtrl.repeat();
+
+      try {
+        await DI.narratorService.speak(_narrationText!, style: _style);
+        if (mounted) {
+          setState(() => _isPlaying = false);
+          _waveCtrl.stop();
+          _waveCtrl.reset();
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() { _isPlaying = false; _errorMsg = 'TTS error: $e'; });
+          _waveCtrl.stop();
+          _waveCtrl.reset();
+        }
+      }
+    }
+  }
+
+  Future<void> _stopPlayback() async {
+    await DI.narratorService.stop();
+    if (mounted) {
+      setState(() => _isPlaying = false);
+      _waveCtrl.stop();
+      _waveCtrl.reset();
     }
   }
 
@@ -164,24 +179,25 @@ class _NarratorScreenState extends State<NarratorScreen>
         title: const Text('Gemini API Key Required',
             style: TextStyle(color: AppColors.textPrimary)),
         content: const Text(
-          'Add your free Gemini key in Settings → API Setup.\n\n'
+          'Add your free Gemini key in API Setup.\n\n'
           'Get a free key at aistudio.google.com',
           style: TextStyle(color: AppColors.textSecondary),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('OK', style: TextStyle(color: AppColors.primary)),
+            child: const Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _openApiSetup();
+            },
+            child: const Text('API Setup'),
           ),
         ],
       ),
     );
-  }
-
-  String _formatDuration(Duration d) {
-    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$m:$s';
   }
 
   @override
@@ -214,27 +230,32 @@ class _NarratorScreenState extends State<NarratorScreen>
 
                   // ── No API key warning ───────────────────────────────────────
                   if (!_hasApiKey)
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 16),
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: AppColors.warning.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                            color: AppColors.warning.withValues(alpha: 0.4)),
-                      ),
-                      child: Row(children: [
-                        const Icon(Icons.warning_amber_rounded,
-                            color: AppColors.warning, size: 20),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            DI.languageService.translate('txt_no_gemini_key'),
-                            style: const TextStyle(
-                                fontSize: 13, color: AppColors.warning),
-                          ),
+                    GestureDetector(
+                      onTap: _openApiSetup,
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 16),
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: AppColors.warning.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                              color: AppColors.warning.withValues(alpha: 0.4)),
                         ),
-                      ]),
+                        child: Row(children: [
+                          const Icon(Icons.warning_amber_rounded,
+                              color: AppColors.warning, size: 20),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              DI.languageService.translate('txt_no_gemini_key'),
+                              style: const TextStyle(
+                                  fontSize: 13, color: AppColors.warning),
+                            ),
+                          ),
+                          const Icon(Icons.chevron_right,
+                              color: AppColors.warning, size: 18),
+                        ]),
+                      ),
                     ),
 
                   // ── Playback card ────────────────────────────────────────────
@@ -298,71 +319,64 @@ class _NarratorScreenState extends State<NarratorScreen>
                             ),
                           ),
                         ),
-                        const SizedBox(height: 8),
-
-                        // Progress bar
-                        SliderTheme(
-                          data: SliderTheme.of(context).copyWith(
-                            thumbShape: const RoundSliderThumbShape(
-                                enabledThumbRadius: 6),
-                            overlayShape: const RoundSliderOverlayShape(
-                                overlayRadius: 14),
-                          ),
-                          child: Slider(
-                            value: _progress.clamp(0.0, 1.0),
-                            onChanged: (v) async {
-                              final pos = Duration(
-                                milliseconds:
-                                    (v * _total.inMilliseconds).round(),
-                              );
-                              await _player.seek(pos);
-                            },
-                          ),
-                        ),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(_formatDuration(_position),
-                                style: AppTypography.caption),
-                            Text(_formatDuration(_total),
-                                style: AppTypography.caption),
-                          ],
-                        ),
                         const SizedBox(height: 16),
 
-                        // Play / Pause button
-                        Center(
-                          child: GestureDetector(
-                            onTap: _togglePlayPause,
-                            child: Container(
-                              width: 64, height: 64,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: _isLoading
-                                    ? AppColors.bg3 : AppColors.primary,
-                                boxShadow: _isLoading ? null : [
-                                  BoxShadow(
-                                    color: AppColors.primary.withValues(alpha: 0.4),
-                                    blurRadius: 20,
-                                    offset: const Offset(0, 4),
-                                  ),
-                                ],
-                              ),
-                              child: _isLoading
-                                  ? const Padding(
-                                      padding: EdgeInsets.all(18),
-                                      child: CircularProgressIndicator(
-                                          strokeWidth: 2.5,
-                                          color: AppColors.primary))
-                                  : Icon(
-                                      _isPlaying
-                                          ? Icons.pause_rounded
-                                          : Icons.play_arrow_rounded,
-                                      size: 32,
-                                      color: AppColors.bg0,
+                        // Play / Pause / Stop buttons
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            // Stop button
+                            if (_isPlaying || _narrationText != null)
+                              GestureDetector(
+                                onTap: _stopPlayback,
+                                child: Container(
+                                  width: 44, height: 44,
+                                  margin: const EdgeInsets.only(right: 16),
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: AppColors.bg3,
+                                    border: Border.all(
+                                      color: AppColors.textMuted.withValues(alpha: 0.3),
                                     ),
+                                  ),
+                                  child: const Icon(Icons.stop_rounded,
+                                      size: 22, color: AppColors.textSecondary),
+                                ),
+                              ),
+
+                            // Play/Pause button
+                            GestureDetector(
+                              onTap: _togglePlayPause,
+                              child: Container(
+                                width: 64, height: 64,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: _isLoading
+                                      ? AppColors.bg3 : AppColors.primary,
+                                  boxShadow: _isLoading ? null : [
+                                    BoxShadow(
+                                      color: AppColors.primary.withValues(alpha: 0.4),
+                                      blurRadius: 20,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ],
+                                ),
+                                child: _isLoading
+                                    ? const Padding(
+                                        padding: EdgeInsets.all(18),
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 2.5,
+                                            color: AppColors.primary))
+                                    : Icon(
+                                        _isPlaying
+                                            ? Icons.pause_rounded
+                                            : Icons.play_arrow_rounded,
+                                        size: 32,
+                                        color: AppColors.bg0,
+                                      ),
+                              ),
                             ),
-                          ),
+                          ],
                         ),
                       ],
                     ),
@@ -420,11 +434,14 @@ class _NarratorScreenState extends State<NarratorScreen>
                       children: kDefaultRegions.map((r) {
                         final active = r.id == _region.id;
                         return GestureDetector(
-                          onTap: () => setState(() {
-                            _region = r;
-                            _narrationText = null;
-                            _errorMsg = null;
-                          }),
+                          onTap: () {
+                            _stopPlayback();
+                            setState(() {
+                              _region = r;
+                              _narrationText = null;
+                              _errorMsg = null;
+                            });
+                          },
                           child: AnimatedContainer(
                             duration: const Duration(milliseconds: 180),
                             margin: const EdgeInsets.only(right: 8),
@@ -433,12 +450,12 @@ class _NarratorScreenState extends State<NarratorScreen>
                             decoration: BoxDecoration(
                               color: active
                                   ? AppColors.primary.withValues(alpha: 0.15)
-                                  : AppColors.bg3,
+                                  : colors.bg3,
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(
                                 color: active
                                     ? AppColors.primary
-                                    : const Color(0xFF252840),
+                                    : colors.cardBorder,
                               ),
                             ),
                             child: Text(r.name.split(' ').first,
@@ -448,7 +465,7 @@ class _NarratorScreenState extends State<NarratorScreen>
                                     ? FontWeight.w700 : FontWeight.w400,
                                 color: active
                                     ? AppColors.primary
-                                    : AppColors.textSecondary,
+                                    : colors.textSecondary,
                               )),
                           ),
                         );
@@ -467,11 +484,14 @@ class _NarratorScreenState extends State<NarratorScreen>
                         child: EraChip(
                           era: e,
                           isSelected: e == _era,
-                          onTap: () => setState(() {
-                            _era = e;
-                            _narrationText = null;
-                            _errorMsg = null;
-                          }),
+                          onTap: () {
+                            _stopPlayback();
+                            setState(() {
+                              _era = e;
+                              _narrationText = null;
+                              _errorMsg = null;
+                            });
+                          },
                         ),
                       ),
                     )).toList(),
@@ -488,23 +508,26 @@ class _NarratorScreenState extends State<NarratorScreen>
                           padding: EdgeInsets.only(
                               right: s != VoiceStyle.values.last ? 8 : 0),
                           child: GestureDetector(
-                            onTap: () => setState(() {
-                              _style = s;
-                              _narrationText = null;
-                              _errorMsg = null;
-                            }),
+                            onTap: () {
+                              _stopPlayback();
+                              setState(() {
+                                _style = s;
+                                _narrationText = null;
+                                _errorMsg = null;
+                              });
+                            },
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 180),
                               padding: const EdgeInsets.symmetric(vertical: 10),
                               decoration: BoxDecoration(
                                 color: active
                                     ? AppColors.primary.withValues(alpha: 0.15)
-                                    : AppColors.bg3,
+                                    : colors.bg3,
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
                                   color: active
                                       ? AppColors.primary
-                                      : const Color(0xFF252840),
+                                      : colors.cardBorder,
                                 ),
                               ),
                               child: Text(
@@ -516,7 +539,7 @@ class _NarratorScreenState extends State<NarratorScreen>
                                       ? FontWeight.w700 : FontWeight.w400,
                                   color: active
                                       ? AppColors.primary
-                                      : AppColors.textSecondary,
+                                      : colors.textSecondary,
                                 ),
                               ),
                             ),
@@ -533,12 +556,18 @@ class _NarratorScreenState extends State<NarratorScreen>
                     icon: _isLoading
                         ? const SizedBox(width: 18, height: 18,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2, color: AppColors.bg0))
+                                strokeWidth: 2, color: Colors.white))
                         : const Icon(Icons.auto_awesome,
-                            size: 18, color: AppColors.bg0),
-                    label: Text(_isLoading
-                        ? DI.languageService.translate('btn_generating')
-                        : DI.languageService.translate('btn_generate_play')),
+                            size: 18, color: Colors.white),
+                    label: Text(
+                      _isLoading
+                          ? DI.languageService.translate('btn_generating')
+                          : DI.languageService.translate('btn_generate_play'),
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                    ),
                   ),
                   const SizedBox(height: 32),
                 ],

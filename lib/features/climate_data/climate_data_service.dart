@@ -45,9 +45,7 @@ class ClimateDataService {
     'himalaya': BBox(north: 35,  south: 25,  east: 95,  west: 75),
   };
 
-  // ─────────────────────────────────────────────
-  // AQI Methods
-  // ─────────────────────────────────────────────
+
 
   Future<List<AqiReading>> fetchCityAqi(String city) async {
     final cached = _getAqiCache(city);
@@ -110,9 +108,7 @@ class ClimateDataService {
     ];
   }
 
-  // ─────────────────────────────────────────────
-  // Climate Stats Methods
-  // ─────────────────────────────────────────────
+
 
   Future<ClimateStats> getStatsForYear(int year, {String? noaaKey}) async {
     if (year <= 1900) {
@@ -199,9 +195,7 @@ class ClimateDataService {
     }
   }
 
-  // ─────────────────────────────────────────────
-  // Global Forest Watch Methods
-  // ─────────────────────────────────────────────
+
 
   BBox getBBox(String regionId) {
     return _regionBounds[regionId] ?? _regionBounds['amazon']!;
@@ -274,7 +268,7 @@ class ClimateDataService {
       <altitude>0</altitude>
       <heading>30</heading>
       <tilt>60</tilt>
-      <range>80000</range>
+      <range>35000</range>
       <altitudeMode>relativeToGround</altitudeMode>
     </LookAt>
     
@@ -589,9 +583,7 @@ class ClimateDataService {
     );
   }
 
-  // ─────────────────────────────────────────────
-  // Private Helper Methods
-  // ─────────────────────────────────────────────
+
 
   Future<double> _fetchRemoteTempAnomaly({String? noaaApiKey}) async {
     const cacheKey = 'temp_anomaly';
@@ -712,8 +704,8 @@ class ClimateDataService {
     final latSpan = (bbox.north - bbox.south).abs();
     final lonSpan = (bbox.east - bbox.west).abs();
     final span = latSpan > lonSpan ? latSpan : lonSpan;
-    final range = span * 110000 * 1.2;
-    return range.clamp(400000.0, 1500000.0);
+    final range = span * 111000.0 * 0.45;
+    return range.clamp(35000.0, 220000.0);
   }
 
   String _regionName(String id) => switch (id) {

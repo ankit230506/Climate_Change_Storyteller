@@ -91,6 +91,21 @@ class _ApiSetupScreenState extends State<ApiSetupScreen> {
                 obscure: _obscure,
                 onToggleObscure: () => setState(() => _obscure = !_obscure),
                 onChanged: (v) => setState(() => _geminiSet = v.length > 8),
+                onClear: () async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  await SecureStorageService.instance.deleteGeminiKey();
+                  if (!mounted) return;
+                  setState(() {
+                    _geminiCtrl.clear();
+                    _geminiSet = false;
+                  });
+                  messenger.showSnackBar(
+                    const SnackBar(
+                      content: Text('Gemini API Key deleted successfully'),
+                      backgroundColor: AppColors.good,
+                    ),
+                  );
+                },
               ),
               const SizedBox(height: 24),
 
@@ -141,9 +156,17 @@ class _ApiSetupScreenState extends State<ApiSetupScreen> {
               ElevatedButton(
                 onPressed: _geminiSet
                     ? () async {
+                        final navigator = Navigator.of(context);
+                        final messenger = ScaffoldMessenger.of(context);
                         await SecureStorageService.instance.saveGeminiKey(_geminiCtrl.text);
-                        if (!mounted) return;
-                        Navigator.pop(context);
+                        messenger.showSnackBar(
+                          const SnackBar(
+                            content: Text('Gemini API key saved successfully!'),
+                            backgroundColor: AppColors.good,
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                        navigator.pop(true);
                       }
                     : null,
                 child: const Text('Save & Continue'),
@@ -172,6 +195,7 @@ class _ApiKeyTile extends StatelessWidget {
   final bool obscure;
   final VoidCallback onToggleObscure;
   final ValueChanged<String> onChanged;
+  final VoidCallback? onClear;
 
   const _ApiKeyTile({
     required this.icon,
@@ -183,6 +207,7 @@ class _ApiKeyTile extends StatelessWidget {
     required this.obscure,
     required this.onToggleObscure,
     required this.onChanged,
+    this.onClear,
   });
 
   @override
@@ -230,10 +255,21 @@ class _ApiKeyTile extends StatelessWidget {
             decoration: InputDecoration(
               hintText: 'AIza••••••••••••',
               hintStyle: TextStyle(color: colors.textMuted),
-              suffixIcon: IconButton(
-                icon: Icon(obscure ? Icons.visibility_off : Icons.visibility,
-                    color: colors.textMuted, size: 18),
-                onPressed: onToggleObscure,
+              suffixIcon: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: Icon(obscure ? Icons.visibility_off : Icons.visibility,
+                        color: colors.textMuted, size: 18),
+                    onPressed: onToggleObscure,
+                  ),
+                  if (controller.text.isNotEmpty && onClear != null)
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline,
+                          color: AppColors.critical, size: 18),
+                      onPressed: onClear,
+                    ),
+                ],
               ),
             ),
           ),
