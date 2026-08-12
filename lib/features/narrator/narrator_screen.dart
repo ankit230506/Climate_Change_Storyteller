@@ -102,6 +102,7 @@ class _NarratorScreenState extends State<NarratorScreen>
         return;
       }
 
+      DI.narratorService.resetPauseState();
       // Step 2: Speak using flutter_tts
       setState(() { _isPlaying = true; _isLoading = false; });
       _waveCtrl.repeat();
@@ -141,12 +142,17 @@ class _NarratorScreenState extends State<NarratorScreen>
       _waveCtrl.stop();
       setState(() => _isPlaying = false);
     } else {
-      // Re-speak the narration text from beginning
+      // Resume narration text from paused offset
       setState(() => _isPlaying = true);
       _waveCtrl.repeat();
 
       try {
-        await DI.narratorService.speak(_narrationText!, style: _style);
+        final offset = DI.narratorService.pausedOffset;
+        await DI.narratorService.speak(
+          _narrationText!,
+          style: _style,
+          startFromOffset: offset,
+        );
         if (mounted) {
           setState(() => _isPlaying = false);
           _waveCtrl.stop();

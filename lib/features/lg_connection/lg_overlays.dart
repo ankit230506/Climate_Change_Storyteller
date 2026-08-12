@@ -44,12 +44,13 @@ class LGOverlays {
     String? eraLabel,
     Map<String, String>? stats,
   }) {
-    const width = 260;
-    final height = (stats != null && stats.isNotEmpty) ? 380 : 280;
+    const width = 300;
+    final height = (stats != null && stats.isNotEmpty) ? 420 : 320;
     final pixels = Uint8List(width * height * 4);
 
-    _fillRect(pixels, width, height, 0, 0, width, height, 15, 18, 30, 230);
-    _drawRectBorder(pixels, width, height, 0, 0, width, height, 50, 65, 90, 255, 2);
+    // Dark glassmorphic background card
+    _fillRect(pixels, width, height, 0, 0, width, height, 15, 18, 30, 240);
+    _drawRectBorder(pixels, width, height, 0, 0, width, height, 50, 75, 110, 255, 2);
 
     var title = switch (category) {
       'aqi'      => 'AQI INDEX LEGEND',
@@ -66,84 +67,126 @@ class LGOverlays {
 
     final items = switch (category) {
       'aqi' => [
-        {'label': 'Good (0-50)',           'r': 46,  'g': 204, 'b': 113},
-        {'label': 'Fair (51-100)',         'r': 241, 'g': 196, 'b': 15},
-        {'label': 'Moderate (101-150)',    'r': 230, 'g': 126, 'b': 34},
-        {'label': 'Poor (151-200)',        'r': 231, 'g': 76,  'b': 60},
-        {'label': 'Very Poor (201+)',      'r': 155, 'g': 89,  'b': 182},
+        {'label': 'Good (0-50 µg)',         'r': 46,  'g': 204, 'b': 113},
+        {'label': 'Moderate (51-100 µg)',    'r': 241, 'g': 196, 'b': 15},
+        {'label': 'Unhealthy (101-150 µg)', 'r': 230, 'g': 126, 'b': 34},
+        {'label': 'Severe (151-200 µg)',    'r': 231, 'g': 76,  'b': 60},
+        {'label': 'Hazardous (201+ µg)',    'r': 155, 'g': 89,  'b': 182},
       ],
       'forest' => [
-        {'label': 'Intact Canopy',         'r': 39,  'g': 174, 'b': 96},
+        {'label': 'Intact Canopy (>80%)',   'r': 39,  'g': 174, 'b': 96},
         {'label': 'Light Deforestation',   'r': 184, 'g': 233, 'b': 134},
-        {'label': 'Moderate Loss',         'r': 243, 'g': 156, 'b': 18},
-        {'label': 'Heavy Loss',            'r': 211, 'g': 84,  'b': 0},
-        {'label': 'Critical Loss',         'r': 192, 'g': 57,  'b': 43},
+        {'label': 'Moderate Loss (30-50%)', 'r': 243, 'g': 156, 'b': 18},
+        {'label': 'Heavy Loss (50-70%)',    'r': 211, 'g': 84,  'b': 0},
+        {'label': 'Critical Loss (>70%)',   'r': 192, 'g': 57,  'b': 43},
       ],
       'sealevel' => [
-        {'label': 'Minimal Rise (0m)',     'r': 41,  'g': 128, 'b': 185},
-        {'label': 'Low Inundation (1m)',   'r': 26,  'g': 188, 'b': 156},
-        {'label': 'Moderate Flood (3m)',   'r': 241, 'g': 196, 'b': 15},
-        {'label': 'High Risk (5m)',        'r': 230, 'g': 126, 'b': 34},
-        {'label': 'Extreme Flood (10m)',   'r': 192, 'g': 57,  'b': 43},
+        {'label': 'Baseline Sea Level',    'r': 41,  'g': 128, 'b': 185},
+        {'label': 'Low Inundation (0.3m)',  'r': 26,  'g': 188, 'b': 156},
+        {'label': 'Moderate Flood (0.5m)',  'r': 241, 'g': 196, 'b': 15},
+        {'label': 'High Risk (0.8m)',       'r': 230, 'g': 126, 'b': 34},
+        {'label': 'Extreme Flood (1.0m+)',  'r': 192, 'g': 57,  'b': 43},
       ],
       'glacier' => [
         {'label': 'Solid Ice Sheet',       'r': 175, 'g': 238, 'b': 238},
         {'label': 'Minor Thinning',        'r': 127, 'g': 205, 'b': 205},
         {'label': 'Moderate Melt',         'r': 241, 'g': 196, 'b': 15},
-        {'label': 'Rapid Loss',            'r': 230, 'g': 126, 'b': 34},
-        {'label': 'Severe Loss',           'r': 231, 'g': 76,  'b': 60},
+        {'label': 'Rapid Ice Loss',        'r': 230, 'g': 126, 'b': 34},
+        {'label': 'Severe Collapse',       'r': 231, 'g': 76,  'b': 60},
       ],
       _ => [
-        {'label': 'Normal (+0°C)',         'r': 46,  'g': 204, 'b': 113},
-        {'label': 'Mild (+1.5°C)',         'r': 241, 'g': 196, 'b': 15},
+        {'label': 'Pre-industrial (+0°C)', 'r': 46,  'g': 204, 'b': 113},
+        {'label': 'Mild Warming (+1.5°C)', 'r': 241, 'g': 196, 'b': 15},
         {'label': 'Moderate (+2.5°C)',     'r': 230, 'g': 126, 'b': 34},
         {'label': 'Severe (+4.0°C)',       'r': 231, 'g': 76,  'b': 60},
-        {'label': 'Extreme (+6.0°C)',      'r': 142, 'g': 68,  'b': 173},
+        {'label': 'Extreme (+5.5°C+)',     'r': 142, 'g': 68,  'b': 173},
       ],
     };
 
     _drawSimpleText(pixels, width, height, title, 16, 16, 255, 255, 255, 255, scale: 1);
-    _drawLine(pixels, width, height, 16, 36, width - 16, 36, 60, 75, 105, 255, 1);
+    _drawLine(pixels, width, height, 16, 36, width - 16, 36, 60, 85, 120, 255, 1);
 
     for (int i = 0; i < items.length; i++) {
       final item = items[i];
-      final y = 48 + i * 44;
+      final y = 46 + i * 40;
       final r = item['r'] as int;
       final g = item['g'] as int;
       final b = item['b'] as int;
       final label = item['label'] as String;
 
-      _fillRoundedRect(pixels, width, height, 18, y, 28, 28, 4, r, g, b, 255);
-      _drawRectBorder(pixels, width, height, 18, y, 28, 28, 255, 255, 255, 180, 1);
+      _fillRoundedRect(pixels, width, height, 18, y, 26, 26, 4, r, g, b, 255);
+      _drawRectBorder(pixels, width, height, 18, y, 26, 26, 255, 255, 255, 180, 1);
 
-      _drawSimpleText(pixels, width, height, label, 56, y + 8, 225, 235, 245, 255, scale: 1);
+      _drawSimpleText(pixels, width, height, label, 54, y + 7, 225, 235, 245, 255, scale: 1);
     }
 
     if (stats != null && stats.isNotEmpty) {
-      _drawLine(pixels, width, height, 16, 260, width - 16, 260, 60, 75, 105, 255, 1);
-      _drawSimpleText(pixels, width, height, 'KEY DATA (PAST -> NOW -> FUTURE)', 16, 270, 255, 255, 255, 255, scale: 1);
+      _drawLine(pixels, width, height, 16, 252, width - 16, 252, 60, 85, 120, 255, 1);
+      _drawSimpleText(pixels, width, height, 'KEY CLIMATE INDICATORS (1900->2100)', 16, 262, 255, 255, 255, 255, scale: 1);
 
       final statEntries = stats.entries.take(4).toList();
       for (int i = 0; i < statEntries.length; i++) {
         final entry = statEntries[i];
-        final statY = 286 + i * 16;
+        final statY = 278 + i * 16;
         _drawSimpleText(
           pixels, width, height,
           '${entry.key}: ${entry.value}',
           16, statY,
-          100, 200, 255, 255,
+          100, 210, 255, 255,
           scale: 1,
         );
       }
+
+      _drawSimpleText(
+        pixels, width, height,
+        'RISK STATUS: HIGH TIPPING POINT SENSITIVITY',
+        16, 348,
+        255, 180, 50, 255,
+        scale: 1,
+      );
     }
 
     _drawSimpleText(
       pixels, width, height,
-      'Source: IPCC AR6 SSP3-7.0',
-      16, height - 18,
-      120, 130, 150, 200,
+      'Source: IPCC AR6 / NASA GIBS / NOAA CDO',
+      16, height - 20,
+      130, 145, 170, 220,
       scale: 1,
     );
+
+    return _encodePng(pixels, width, height);
+  }
+
+  /// Returns PNG bytes for a Regional Summary HUD card displayed on Left LG Screen.
+  static Uint8List createRegionalSummaryCardPng({
+    required String regionName,
+    required String category,
+    required String eraLabel,
+    String? tempAnomaly,
+    String? primaryMetric,
+  }) {
+    const width = 320;
+    const height = 180;
+    final pixels = Uint8List(width * height * 4);
+
+    _fillRect(pixels, width, height, 0, 0, width, height, 12, 16, 28, 240);
+    _drawRectBorder(pixels, width, height, 0, 0, width, height, 52, 152, 219, 255, 2);
+
+    _drawSimpleText(pixels, width, height, "CLIMATE STORYTELLER HUD", 16, 14, 52, 152, 219, 255, scale: 1);
+    _drawLine(pixels, width, height, 16, 32, width - 16, 32, 52, 152, 219, 180, 1);
+
+    _drawSimpleText(pixels, width, height, regionName.toUpperCase(), 16, 42, 255, 255, 255, 255, scale: 2);
+    _drawSimpleText(pixels, width, height, "TIMELINE ERA: $eraLabel", 16, 76, 241, 196, 15, 255, scale: 1);
+
+    if (tempAnomaly != null && tempAnomaly.isNotEmpty) {
+      _drawSimpleText(pixels, width, height, "TEMP ANOMALY: $tempAnomaly", 16, 98, 231, 76, 60, 255, scale: 1);
+    }
+
+    if (primaryMetric != null && primaryMetric.isNotEmpty) {
+      _drawSimpleText(pixels, width, height, "METRIC: $primaryMetric", 16, 118, 46, 204, 113, 255, scale: 1);
+    }
+
+    _drawSimpleText(pixels, width, height, "LIQUID GALAXY MULTI-DISPLAY SYSTEM", 16, 150, 140, 155, 175, 255, scale: 1);
 
     return _encodePng(pixels, width, height);
   }

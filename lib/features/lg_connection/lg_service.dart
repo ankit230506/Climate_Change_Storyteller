@@ -232,6 +232,13 @@ class LgService {
   Future<void> disconnect() async {
     _keepaliveTimer?.cancel();
     _keepaliveTimer = null;
+
+    try {
+      if (_client != null && _state.isConnected) {
+        await cleanKml();
+      }
+    } catch (_) {}
+
     _sftp?.close();
     _sftp = null;
     _client?.close();
@@ -250,6 +257,12 @@ class LgService {
   // LG Action Methods
   // ─────────────────────────────────────────────
 
+  int? _pendingTimeQueryYear;
+  double? _pendingTimeQueryLat;
+  double? _pendingTimeQueryLon;
+  double? _pendingTimeQueryAlt;
+  bool _isSendingTimeQuery = false;
+
   /// Immediately sends a time command to Liquid Galaxy query.txt
   /// moving Google Earth's time slider clock in real-time (0ms latency).
   Future<void> sendTimeQuery(
@@ -259,20 +272,45 @@ class LgService {
     double? altitude,
   }) async {
     if (_client == null || !_state.isConnected) return;
-    try {
-      final timeStr = '$year-01-01T00:00:00Z';
-      final endStr = '$year-12-31T23:59:59Z';
-      await execute("echo 'time=$timeStr' > $_queryFile");
-      await execute("echo 'timeSpan=$timeStr/$endStr' > $_queryFile");
-      await execute("echo 'clock=$timeStr' > $_queryFile");
 
-      if (latitude != null && longitude != null) {
-        final alt = altitude ?? 200000.0;
-        final flyStr = 'flytoview=<LookAt><longitude>$longitude</longitude><latitude>$latitude</latitude><range>$alt</range><tilt>45</tilt><heading>0</heading><altitudeMode>relativeToGround</altitudeMode><TimeSpan><begin>$timeStr</begin><end>$endStr</end></TimeSpan></LookAt>';
+    _pendingTimeQueryYear = year;
+    _pendingTimeQueryLat = latitude;
+    _pendingTimeQueryLon = longitude;
+    _pendingTimeQueryAlt = altitude;
+
+    if (_isSendingTimeQuery) return;
+    _isSendingTimeQuery = true;
+
+    try {
+      while (_pendingTimeQueryYear != null) {
+        final targetYear = _pendingTimeQueryYear!;
+        final lat = _pendingTimeQueryLat ?? _lastFlyToLat ?? 28.6139;
+        final lon = _pendingTimeQueryLon ?? _lastFlyToLon ?? 77.2090;
+        final alt = _pendingTimeQueryAlt ?? _lastFlyToAlt ?? 45000.0;
+        _pendingTimeQueryYear = null;
+
+        final timeStr = '$targetYear-01-01T00:00:00Z';
+        final endStr = '$targetYear-12-31T23:59:59Z';
+
+        final flyStr =
+            'flytoview=<LookAt xmlns:gx="http://www.google.com/kml/ext/2.2">'
+            '<longitude>$lon</longitude>'
+            '<latitude>$lat</latitude>'
+            '<altitude>0</altitude>'
+            '<heading>$_default3DHeading</heading>'
+            '<tilt>$_default3DTilt</tilt>'
+            '<range>$alt</range>'
+            '<altitudeMode>relativeToGround</altitudeMode>'
+            '<gx:TimeSpan><begin>$timeStr</begin><end>$endStr</end></gx:TimeSpan>'
+            '<gx:TimeStamp><when>$timeStr</when></gx:TimeStamp>'
+            '</LookAt>';
+
         await execute("echo '$flyStr' > $_queryFile");
       }
     } catch (e) {
       debugPrint('sendTimeQuery error: $e');
+    } finally {
+      _isSendingTimeQuery = false;
     }
   }
 
@@ -285,8 +323,11 @@ class LgService {
 
   void startLgViewpointPolling() {
     _bgViewpointTimer?.cancel();
+    bool isPollingViewpoint = false;
     _bgViewpointTimer = Timer.periodic(const Duration(milliseconds: 600), (_) async {
       if (_client == null || !_state.isConnected) return;
+      if (isPollingViewpoint) return;
+      isPollingViewpoint = true;
       try {
         final out = await execute(
           'cat /tmp/views.txt 2>/dev/null || '
@@ -299,7 +340,9 @@ class LgService {
             _viewpointCtrl.add(vp);
           }
         }
-      } catch (_) {}
+      } catch (_) {} finally {
+        isPollingViewpoint = false;
+      }
     });
   }
 
@@ -335,10 +378,6 @@ class LgService {
     if (_client == null || !_state.isConnected) return;
     try {
       await sendKml(kmlFilename, kmlContent: kmlContent);
-      final host = _state.ipAddress ?? 'localhost';
-      final port = _state.webPort;
-      final kmlUrl = 'http://$host:$port/kmls_1.txt';
-      await execute("echo '$kmlUrl' > $_queryFile");
     } catch (e) {
       debugPrint('sendKmlRealtime error: $e');
     }
@@ -369,33 +408,43 @@ class LgService {
   Future<void> sendKml(String kmlFilename, {String? kmlContent}) async {
     if (_client == null) throw Exception('Not connected');
 
-    // Automatically upload logo and environmental legend PNG overlays to the LG web server
+    // Automatically upload logo overlay asset to the LG web server
     final category = _extractCategoryFromFilename(kmlFilename);
     await _uploadOverlayAssets(category);
 
     final host = _state.ipAddress ?? 'localhost';
-    final kmlUrl = 'http://$host:${_state.webPort}/kml/$kmlFilename';
-    final netLinkKml = _buildNetworkLinkKml(kmlUrl);
+    final masterKmlFilename = 'master_$kmlFilename';
+    final slaveKmlFilename = 'slave_$kmlFilename';
 
     if (kmlContent != null && kmlContent.isNotEmpty) {
-      await _sftpUpload('$_kmlDir/$kmlFilename', utf8.encode(kmlContent));
+      final masterContent = _stripBalloonVisibility(kmlContent);
+      final slaveContent = _stripTimeSpans(kmlContent);
+
+      await _sftpUpload('$_kmlDir/$kmlFilename', utf8.encode(masterContent));
+      await _sftpUpload('$_kmlDir/$masterKmlFilename', utf8.encode(masterContent));
+      await _sftpUpload('$_kmlDir/$slaveKmlFilename', utf8.encode(slaveContent));
     }
 
-    final netLinkBytes = utf8.encode(netLinkKml);
+    final masterNetLinkKml = _buildNetworkLinkKml('http://$host:${_state.webPort}/kml/$masterKmlFilename');
+    final slaveNetLinkKml = _buildNetworkLinkKml('http://$host:${_state.webPort}/kml/$slaveKmlFilename');
+
+    final leftScreenIndex = getLeftMostScreenNumber(_state.screenCount);
+    final masterScreenIndex = getMasterScreenNumber(_state.screenCount);
+    final rightScreenIndex = getRightMostScreenNumber(_state.screenCount);
+
     for (int i = 1; i <= _state.screenCount; i++) {
-      await _sftpUpload('$_kmlDir/kml_$i.kml', netLinkBytes);
-      await _sftpUpload('$_kmlDir/slave_$i.kml', netLinkBytes);
+      if (i == masterScreenIndex) {
+        await _sftpUpload('$_kmlDir/kml_$i.kml', utf8.encode(masterNetLinkKml));
+        await _sftpUpload('$_kmlDir/master.kml', utf8.encode(masterNetLinkKml));
+      } else {
+        await _sftpUpload('$_kmlDir/kml_$i.kml', utf8.encode(slaveNetLinkKml));
+        await _sftpUpload('$_kmlDir/slave_$i.kml', utf8.encode(slaveNetLinkKml));
+      }
     }
-    await _sftpUpload('$_kmlDir/master.kml', netLinkBytes);
 
     if (kmlContent != null && kmlContent.isNotEmpty) {
       final sceneOnly = _stripScreenOverlays(kmlContent);
       final logoBlock = _extractScreenOverlay(kmlContent, 'lg_logo.png');
-      final legendBlock = _extractScreenOverlay(kmlContent, 'legend_');
-
-      final leftScreenIndex = getLeftMostScreenNumber(_state.screenCount);
-      final masterScreenIndex = getMasterScreenNumber(_state.screenCount);
-      final rightScreenIndex = getRightMostScreenNumber(_state.screenCount);
 
       final webPort = _state.webPort;
       final effectiveLogoBlock = logoBlock.isNotEmpty
@@ -412,33 +461,35 @@ class LgService {
       for (int i = 1; i <= _state.screenCount; i++) {
         var screenKml = sceneOnly;
 
-        if (i == leftScreenIndex) {
-          screenKml = _stripPlacemarks(screenKml);
-          screenKml = _stripTimeSpans(screenKml);
-          screenKml = screenKml.replaceFirst('</Document>', '$effectiveLogoBlock</Document>');
-        } else if (i == masterScreenIndex) {
+        if (i == masterScreenIndex) {
+          // Master screen (Screen 1): Retains TimeSpan & gx:TimeStamp so the Time Slider GUI renders ONLY on LG Master!
           screenKml = _stripBalloonVisibility(screenKml);
-        } else if (i == rightScreenIndex) {
-          screenKml = _stripTimeSpans(screenKml);
-          if (legendBlock.isNotEmpty) {
-            screenKml = screenKml.replaceFirst('</Document>', '$legendBlock</Document>');
-          }
-          screenKml = _ensureBalloonVisibility(screenKml);
         } else {
+          // All slave screens (Screens 2+): Explicitly strip ALL TimeSpan and TimeStamp tags so no slider is ever rendered on slaves!
           screenKml = _stripTimeSpans(screenKml);
-          screenKml = _stripBalloonVisibility(screenKml);
+          if (i == leftScreenIndex) {
+            screenKml = _stripPlacemarks(screenKml);
+            screenKml = screenKml.replaceFirst('</Document>', '$effectiveLogoBlock</Document>');
+          } else if (i == rightScreenIndex) {
+            screenKml = _ensureBalloonVisibility(screenKml);
+          } else {
+            screenKml = _stripBalloonVisibility(screenKml);
+          }
         }
 
         final screenBytes = utf8.encode(screenKml);
         await _sftpUpload('/var/www/html/kmls_$i.txt', screenBytes);
-        if (i == masterScreenIndex) {
-          await _sftpUpload(_kmlSyncFile, screenBytes);
-        }
       }
+
+      // Also upload a slave-sanitized version (without TimeSpans) to the legacy shared /var/www/html/kmls.txt
+      // so if any slave node polls kmls.txt, it will NEVER display a time slider on the slave screen!
+      final sharedSlaveKml = _stripTimeSpans(sceneOnly);
+      await _sftpUpload(_kmlSyncFile, utf8.encode(sharedSlaveKml));
     } else {
-      await _sftpUpload(_kmlSyncFile, netLinkBytes);
+      await _sftpUpload(_kmlSyncFile, utf8.encode(slaveNetLinkKml));
       for (int i = 1; i <= _state.screenCount; i++) {
-        await _sftpUpload('/var/www/html/kmls_$i.txt', netLinkBytes);
+        final netLink = (i == masterScreenIndex) ? masterNetLinkKml : slaveNetLinkKml;
+        await _sftpUpload('/var/www/html/kmls_$i.txt', utf8.encode(netLink));
       }
     }
 
@@ -450,7 +501,7 @@ class LgService {
     if (_client == null || !_state.isConnected) return;
     try {
       stopOrbit();
-      final emptyKml = '''<?xml version="1.0" encoding="UTF-8"?>
+      const emptyKml = '''<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
     <name>Liquid Galaxy Cleared</name>
@@ -511,8 +562,21 @@ class LgService {
 
   String _stripTimeSpans(String kml) {
     return kml
-        .replaceAll(RegExp(r'<TimeSpan>.*?</TimeSpan>', dotAll: true), '')
-        .replaceAll(RegExp(r'<TimeStamp>.*?</TimeStamp>', dotAll: true), '');
+        .replaceAll(
+          RegExp(
+            r'<(gx:)?Time(Span|Stamp|Primitive)\b[^>]*>.*?</\s*(gx:)?Time(Span|Stamp|Primitive)\s*>',
+            caseSensitive: false,
+            dotAll: true,
+          ),
+          '',
+        )
+        .replaceAll(
+          RegExp(
+            r'<(gx:)?Time(Span|Stamp|Primitive)\b[^>]*/>',
+            caseSensitive: false,
+          ),
+          '',
+        );
   }
 
   String _stripPlacemarks(String kml) {
@@ -551,7 +615,7 @@ class LgService {
   </Document>
 </kml>''';
 
-      final emptyKml = '''<?xml version="1.0" encoding="UTF-8"?>
+      const emptyKml = '''<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
     <name>Liquid Galaxy Base</name>
@@ -660,20 +724,54 @@ class LgService {
     double? altitude,
     double tilt = _default3DTilt,
     double speed = 3.5,
+    Duration flightDelay = const Duration(milliseconds: 4000),
   }) async {
     stopOrbit();
 
     final targetLat = latitude ?? _lastFlyToLat ?? 28.6139;
     final targetLon = longitude ?? _lastFlyToLon ?? 77.2090;
-    final targetAlt = altitude ?? _lastFlyToAlt ?? 180000.0;
+    final targetAlt = altitude ?? _lastFlyToAlt ?? 45000.0;
+
+    _lastFlyToLat = targetLat;
+    _lastFlyToLon = targetLon;
+    _lastFlyToAlt = targetAlt;
 
     _update(_state.copyWith(isOrbiting: true));
 
+    // First fly to the target KML coordinate so Google Earth travels to destination
+    try {
+      final initialLookAtKml =
+          'flytoview=<LookAt>'
+          '<longitude>$targetLon</longitude>'
+          '<latitude>$targetLat</latitude>'
+          '<altitude>0</altitude>'
+          '<heading>0</heading>'
+          '<tilt>$tilt</tilt>'
+          '<range>$targetAlt</range>'
+          '<altitudeMode>relativeToGround</altitudeMode>'
+          '</LookAt>';
+      await execute("echo '$initialLookAtKml' > $_queryFile");
+    } catch (_) {}
+
+    // Wait until Google Earth's camera flight reaches the target KML coordinate
+    if (flightDelay > Duration.zero) {
+      await Future.delayed(flightDelay);
+    }
+
+    // Abort if orbit was stopped or disconnected while flying to coordinate
+    if (!_state.isOrbiting || _client == null || !_state.isConnected) {
+      return;
+    }
+
+    bool isSendingOrbitStep = false;
+    _currentOrbitHeading = 0.0;
     _orbitTimer = Timer.periodic(const Duration(milliseconds: 120), (timer) async {
-      if (!_state.isConnected || _client == null) {
+      if (!_state.isConnected || _client == null || !_state.isOrbiting) {
         stopOrbit();
         return;
       }
+      if (isSendingOrbitStep) return;
+      isSendingOrbitStep = true;
       _currentOrbitHeading = (_currentOrbitHeading + speed) % 360.0;
       try {
         final lookAtKml =
@@ -687,7 +785,9 @@ class LgService {
             '<altitudeMode>relativeToGround</altitudeMode>'
             '</LookAt>';
         await execute("echo '$lookAtKml' > $_queryFile");
-      } catch (_) {}
+      } catch (_) {} finally {
+        isSendingOrbitStep = false;
+      }
     });
   }
 
@@ -965,7 +1065,7 @@ class LgService {
   }
 
   // Increment to invalidate cached KML files when generator logic changes
-  static const int _kmlCacheVersion = 14;
+  static const int _kmlCacheVersion = 15;
 
   Future<String> buildKml({
     required ClimateRegion region,
@@ -991,11 +1091,16 @@ class LgService {
       if (age.inHours < 24) return file.path;
     }
 
-    final era = year <= 1949
-        ? ClimateEra.preindustrial1900
-        : (year >= 2076 ? ClimateEra.projected2100 : ClimateEra.present2026);
+    final era = switch (year) {
+      <= 1924 => ClimateEra.preindustrial1900,
+      <= 1964 => ClimateEra.midCentury1950,
+      <= 1999 => ClimateEra.lateCentury1980,
+      <= 2049 => ClimateEra.present2026,
+      <= 2084 => ClimateEra.midProjection2060,
+      _       => ClimateEra.projected2100,
+    };
 
-    final kml = await _generateKml(region: region, era: era, noaaApiKey: noaaApiKey);
+    final kml = await _generateKml(region: region, era: era, year: year, noaaApiKey: noaaApiKey);
     await file.writeAsString(kml, encoding: utf8);
     return file.path;
   }
@@ -1016,10 +1121,10 @@ class LgService {
   Future<String> _generateKml({
     required ClimateRegion region,
     required ClimateEra era,
+    required int year,
     String? noaaApiKey,
   }) async {
     final regionData = getRegionData(region.id);
-    final eraYear = int.parse(era.label);
 
     final overlayUrl = _buildGibsOverlayUrl(
       region.category,
@@ -1027,12 +1132,13 @@ class LgService {
       region.latitude,
       region.longitude,
     );
-    final stats = _getEraStats(regionData, region.category, eraYear);
+    final stats = _getEraStats(regionData, region.category, year);
     final noaaTemp = await _fetchNoaaTemperature(noaaApiKey);
 
     return _buildKmlString(
       region: region,
       era: era,
+      year: year,
       overlayUrl: overlayUrl,
       stats: stats,
       noaaGlobalTemp: noaaTemp,
@@ -1052,8 +1158,11 @@ class LgService {
     final layer = _gibsLayers[category] ?? _gibsLayers['glacier']!;
     final date = switch (era) {
       ClimateEra.preindustrial1900 => '2000-02-24',
-      ClimateEra.present2026       => '2026-01-01',
-      ClimateEra.projected2100     => '2026-01-01',
+      ClimateEra.midCentury1950    => '2005-06-01',
+      ClimateEra.lateCentury1980   => '2010-06-01',
+      ClimateEra.present2026       => '2023-06-01',
+      ClimateEra.midProjection2060 => '2023-06-01',
+      ClimateEra.projected2100     => '2023-06-01',
     };
 
     final north = (lat + _overlayDegreeOffset).clamp(-90, 90);
@@ -1095,17 +1204,51 @@ class LgService {
     return null;
   }
 
+  double _interpolateMap(Map<int, double> map, int year) {
+    if (map.isEmpty) return 0.0;
+    final years = map.keys.toList()..sort();
+    if (year <= years.first) return map[years.first]!;
+    if (year >= years.last) return map[years.last]!;
+    for (int i = 0; i < years.length - 1; i++) {
+      if (year >= years[i] && year <= years[i + 1]) {
+        final t = (year - years[i]) / (years[i + 1] - years[i]);
+        return map[years[i]]! + t * (map[years[i + 1]]! - map[years[i]]!);
+      }
+    }
+    return 0.0;
+  }
+
   Map<String, String> _getEraStats(IpccRegionData? data, String category, int year) {
-    final tempAnomaly = _interpolate(kTemperatureAnomaly, year);
-    final seaLevel = _interpolate(kSeaLevelRise, year);
-    final iceExtent = _interpolate(kArcticIceExtent, year);
-    final forestLoss = _interpolate(kForestCoverLoss, year);
+    if (data == null) {
+      final tempAnomaly = _interpolate(kTemperatureAnomaly, year);
+      final seaLevel = _interpolate(kSeaLevelRise, year);
+      final iceExtent = _interpolate(kArcticIceExtent, year);
+      final forestLoss = _interpolate(kForestCoverLoss, year);
+
+      return {
+        'temp_anomaly': '+${tempAnomaly.toStringAsFixed(1)}°C',
+        'sea_level':    '${seaLevel.toStringAsFixed(0)} mm',
+        'ice_extent':   '${iceExtent.toStringAsFixed(1)} M km²',
+        'forest_loss':  '${forestLoss.toStringAsFixed(1)}%',
+      };
+    }
+
+    final localTemp = _interpolateMap(data.localTempAnomaly, year);
+    final seaLevel = _interpolateMap(data.seaLevelMm, year);
+    final iceExtentKm2 = _interpolateMap(data.iceExtentKm2, year);
+    final forestPct = _interpolateMap(data.forestCoverPct, year);
+    final aqi = _interpolateMap(data.aqiIndex, year);
+
+    final iceExtentM = iceExtentKm2 / 1000000.0;
+    final forestLossPct = (100.0 - forestPct).clamp(0.0, 100.0);
 
     return {
-      'temp_anomaly': '+${tempAnomaly.toStringAsFixed(1)}°C',
+      'temp_anomaly': '+${localTemp.toStringAsFixed(1)}°C',
       'sea_level':    '${seaLevel.toStringAsFixed(0)} mm',
-      'ice_extent':   '${iceExtent.toStringAsFixed(1)} M km²',
-      'forest_loss':  '${forestLoss.toStringAsFixed(1)}%',
+      'ice_extent':   '${iceExtentM.toStringAsFixed(1)} M km²',
+      'forest_loss':  '${forestLossPct.toStringAsFixed(1)}%',
+      'forest_cover': '${forestPct.toStringAsFixed(1)}%',
+      'aqi':          aqi.toStringAsFixed(0),
     };
   }
 
@@ -1125,11 +1268,13 @@ class LgService {
   String _buildKmlString({
     required ClimateRegion region,
     required ClimateEra era,
+    int? year,
     required String overlayUrl,
     required Map<String, String> stats,
     required double? noaaGlobalTemp,
     required IpccRegionData? regionData,
   }) {
+    final activeYear = year ?? int.tryParse(era.label) ?? 2026;
     final description = regionData?.description[int.parse(era.label)] ??
         'Climate data for ${region.name} — ${era.label}';
 
@@ -1140,43 +1285,68 @@ class LgService {
     final host = _state.ipAddress ?? 'localhost';
     final port = _state.webPort;
 
-
-
-    final pastTemp = regionData?.localTempAnomaly[1900] ?? 0.0;
-    final nowTemp = regionData?.localTempAnomaly[2026] ?? 0.0;
-    final futureTemp = regionData?.localTempAnomaly[2100] ?? 0.0;
+    final pastTemp = regionData != null ? _interpolateMap(regionData.localTempAnomaly, 1900) : 0.0;
+    final nowTemp = regionData != null ? _interpolateMap(regionData.localTempAnomaly, 2026) : 0.0;
+    final activeTemp = regionData != null ? _interpolateMap(regionData.localTempAnomaly, activeYear) : 0.0;
+    final futureTemp = regionData != null ? _interpolateMap(regionData.localTempAnomaly, 2100) : 0.0;
 
     String pastStat = '';
     String nowStat = '';
+    String activeStat = '';
     String futureStat = '';
     String statHeader = '';
 
     if (region.category == 'glacier') {
       statHeader = 'Ice Extent';
-      pastStat = '${(regionData?.iceExtentKm2[1900] ?? 0.0) / 1000000}M km²';
-      nowStat = '${(regionData?.iceExtentKm2[2026] ?? 0.0) / 1000000}M km²';
-      futureStat = '${(regionData?.iceExtentKm2[2100] ?? 0.0) / 1000000}M km²';
+      pastStat = '${((regionData != null ? _interpolateMap(regionData.iceExtentKm2, 1900) : 0.0) / 1000000).toStringAsFixed(1)}M km²';
+      nowStat = '${((regionData != null ? _interpolateMap(regionData.iceExtentKm2, 2026) : 0.0) / 1000000).toStringAsFixed(1)}M km²';
+      activeStat = '${((regionData != null ? _interpolateMap(regionData.iceExtentKm2, activeYear) : 0.0) / 1000000).toStringAsFixed(1)}M km²';
+      futureStat = '${((regionData != null ? _interpolateMap(regionData.iceExtentKm2, 2100) : 0.0) / 1000000).toStringAsFixed(1)}M km²';
     } else if (region.category == 'sealevel') {
       statHeader = 'Sea Level Rise';
-      pastStat = '${regionData?.seaLevelMm[1900] ?? 0} mm';
-      nowStat = '${regionData?.seaLevelMm[2026] ?? 0} mm';
-      futureStat = '${regionData?.seaLevelMm[2100] ?? 0} mm';
+      pastStat = '${(regionData != null ? _interpolateMap(regionData.seaLevelMm, 1900) : 0.0).toStringAsFixed(0)} mm';
+      nowStat = '${(regionData != null ? _interpolateMap(regionData.seaLevelMm, 2026) : 0.0).toStringAsFixed(0)} mm';
+      activeStat = '${(regionData != null ? _interpolateMap(regionData.seaLevelMm, activeYear) : 0.0).toStringAsFixed(0)} mm';
+      futureStat = '${(regionData != null ? _interpolateMap(regionData.seaLevelMm, 2100) : 0.0).toStringAsFixed(0)} mm';
     } else if (region.category == 'forest') {
       statHeader = 'Forest Cover';
-      pastStat = '${regionData?.forestCoverPct[1900] ?? 100}%';
-      nowStat = '${regionData?.forestCoverPct[2026] ?? 100}%';
-      futureStat = '${regionData?.forestCoverPct[2100] ?? 100}%';
+      pastStat = '${(regionData != null ? _interpolateMap(regionData.forestCoverPct, 1900) : 100.0).toStringAsFixed(1)}%';
+      nowStat = '${(regionData != null ? _interpolateMap(regionData.forestCoverPct, 2026) : 100.0).toStringAsFixed(1)}%';
+      activeStat = '${(regionData != null ? _interpolateMap(regionData.forestCoverPct, activeYear) : 100.0).toStringAsFixed(1)}%';
+      futureStat = '${(regionData != null ? _interpolateMap(regionData.forestCoverPct, 2100) : 100.0).toStringAsFixed(1)}%';
     } else if (region.category == 'heat') {
       statHeader = 'Heat Anomaly';
-      pastStat = '+${pastTemp}°C';
-      nowStat = '+${nowTemp}°C';
-      futureStat = '+${futureTemp}°C';
+      pastStat = '+${pastTemp.toStringAsFixed(1)}°C';
+      nowStat = '+${nowTemp.toStringAsFixed(1)}°C';
+      activeStat = '+${activeTemp.toStringAsFixed(1)}°C';
+      futureStat = '+${futureTemp.toStringAsFixed(1)}°C';
     } else if (region.category == 'aqi') {
       statHeader = 'Air Quality Index';
-      pastStat = '${(regionData?.aqiIndex[1900] ?? 0).toStringAsFixed(0)}';
-      nowStat = '${(regionData?.aqiIndex[2026] ?? 0).toStringAsFixed(0)}';
-      futureStat = '${(regionData?.aqiIndex[2100] ?? 0).toStringAsFixed(0)}';
+      pastStat = (regionData != null ? _interpolateMap(regionData.aqiIndex, 1900) : 0.0).toStringAsFixed(0);
+      nowStat = (regionData != null ? _interpolateMap(regionData.aqiIndex, 2026) : 0.0).toStringAsFixed(0);
+      activeStat = (regionData != null ? _interpolateMap(regionData.aqiIndex, activeYear) : 0.0).toStringAsFixed(0);
+      futureStat = (regionData != null ? _interpolateMap(regionData.aqiIndex, 2100) : 0.0).toStringAsFixed(0);
     }
+
+    final isSpecialYear = activeYear != 1900 && activeYear != 2026 && activeYear != 2100;
+
+    // Determine Tipping Point & Severity Badge for active era
+    final riskBadgeHtml = switch (activeYear) {
+      <= 1950 => "<span style='background:#2ecc71;color:#ffffff;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:bold;'>🟢 BASELINE EQUILIBRIUM</span>",
+      <= 1999 => "<span style='background:#f1c40f;color:#000000;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:bold;'>🟡 ELEVATED CLIMATE STRESS</span>",
+      <= 2049 => "<span style='background:#e67e22;color:#ffffff;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:bold;'>🟧 ACTIVE TIPPING RISK</span>",
+      _       => "<span style='background:#e74c3c;color:#ffffff;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:bold;'>🔴 CRITICAL TIPPING POINT BREACH</span>",
+    };
+
+    // Regional Action & Mitigation Guide
+    final actionGuideHtml = switch (region.category) {
+      'glacier'  => 'Enforce Paris Agreement net-zero emissions targets; protect alpine watershed infrastructure; deploy early warning systems for glacial lake outburst floods.',
+      'sealevel' => 'Construct nature-based living shorelines and sea walls; restore mangrove ecosystems; implement climate-managed retreat and aquifer protection plans.',
+      'forest'   => 'Halt commercial deforestation; enforce indigenous land tenure rights; execute large-scale rainforest restoration & carbon sink preservation.',
+      'heat'     => 'Expand urban green canopies and reflective roofs; establish cooling centers for outdoor workers; modernize power grids for extreme weather resilience.',
+      'aqi'      => 'Transition rapidly to electric mobility & renewables; phase out crop stubble burning; enforce industrial emissions standards.',
+      _          => 'Implement sustainable resource management and renewable energy transitions.',
+    };
 
     return '''<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2"
@@ -1185,6 +1355,15 @@ class LgService {
     <name>${LG3DVisuals.escapeXmlText(region.name)} — ${LG3DVisuals.escapeXmlText(era.label)}</name>
     <visibility>1</visibility>
     
+    <!-- Timeline interval so Google Earth displays the Time Slider GUI on LG Master -->
+    <TimeSpan>
+      <begin>1850-01-01T00:00:00Z</begin>
+      <end>2150-12-31T23:59:59Z</end>
+    </TimeSpan>
+    <gx:TimeStamp>
+      <when>$activeYear-01-01T00:00:00Z</when>
+    </gx:TimeStamp>
+
     <Style id="customBalloon">
       <BalloonStyle>
         <text><![CDATA[
@@ -1196,8 +1375,7 @@ class LgService {
       </BalloonStyle>
     </Style>
 
-    <!-- Camera position (tilted so extruded/3D geometry below is actually
-         visible instead of being viewed edge-on from straight overhead) -->
+    <!-- Camera position -->
     <LookAt>
       <longitude>${region.longitude}</longitude>
       <latitude>${region.latitude}</latitude>
@@ -1206,6 +1384,9 @@ class LgService {
       <tilt>$_default3DTilt</tilt>
       <range>${region.altitude}</range>
       <altitudeMode>relativeToGround</altitudeMode>
+      <gx:TimeStamp>
+        <when>$activeYear-01-01T00:00:00Z</when>
+      </gx:TimeStamp>
     </LookAt>
 
     <!-- Screen 1 Overlay: Liquid Galaxy Logo -->
@@ -1220,81 +1401,73 @@ class LgService {
       <size x="180" y="180" xunits="pixels" yunits="pixels"/>
     </ScreenOverlay>
 
-    <!-- Screen 5 Overlay: Environmental Index Legend -->
-    <ScreenOverlay>
-      <name>Environmental Index Legend</name>
-      <Icon>
-        <href>http://$host:$port/kml/legend_${region.category}.png</href>
-      </Icon>
-      <overlayXY x="1" y="0" xunits="fraction" yunits="fraction"/>
-      <screenXY x="0.98" y="0.05" xunits="fraction" yunits="fraction"/>
-      <rotationXY x="0" y="0" xunits="fraction" yunits="fraction"/>
-      <size x="230" y="250" xunits="pixels" yunits="pixels"/>
-    </ScreenOverlay>
-
-    <!-- NASA GIBS overlay -->
-    <GroundOverlay>
-      <name>NASA GIBS — ${LG3DVisuals.escapeXmlText(era.label)}</name>
-      <visibility>1</visibility>
-      <color>99ffffff</color>
-      <description>Source: NASA GIBS WMTS</description>
-      <Icon>
-        <href>$overlayUrl</href>
-        <viewBoundScale>0.75</viewBoundScale>
-      </Icon>
-      <LatLonBox>
-        <north>${(region.latitude + _overlayDegreeOffset).clamp(-90, 90)}</north>
-        <south>${(region.latitude - _overlayDegreeOffset).clamp(-90, 90)}</south>
-        <east>${region.longitude + _overlayDegreeOffset}</east>
-        <west>${region.longitude - _overlayDegreeOffset}</west>
-      </LatLonBox>
-      <altitude>0</altitude>
-      <altitudeMode>clampToGround</altitudeMode>
-    </GroundOverlay>
-
-    <!-- Region placemark -->
+    <!-- Main Region Scientific Data Placemark -->
     <Placemark>
-      <name>${LG3DVisuals.escapeXmlText(region.name)}</name>
+      <name>${LG3DVisuals.escapeXmlText(region.name)} — Scientific Profile</name>
       <visibility>1</visibility>
       <gx:balloonVisibility>1</gx:balloonVisibility>
       <styleUrl>#customBalloon</styleUrl>
       <description><![CDATA[
-        <div style='font-family:Helvetica,Arial,sans-serif;max-width:420px'>
-        <img src='${region.imageUrl}' style='width:100%;max-height:180px;object-fit:cover;border-radius:8px;margin-bottom:10px;' />
-        <h3 style='color:#3498db;margin:0 0 6px'>${region.name} \u2014 Climate Timeline</h3>
-        <p style='color:#95a5a6;font-size:12px;margin:0 0 10px'>How climate has changed from 1900 to projected 2100</p>
-        <table style='border-collapse:collapse;width:100%;font-size:13px'>
-          <tr style='background:#2c3e50;color:#ecf0f1'>
-            <th style='padding:6px 8px;text-align:left'>Era</th>
-            <th style='padding:6px 8px'>Temp \u0394</th>
-            <th style='padding:6px 8px'>$statHeader</th>
-            <th style='padding:6px 8px'>Trend</th>
+        <div style='font-family:Helvetica,Arial,sans-serif;max-width:460px;background:#0f172a;color:#f8fafc;padding:12px;border-radius:10px;box-shadow:0 4px 15px rgba(0,0,0,0.5);'>
+        <img src='${region.imageUrl}' style='width:100%;max-height:200px;object-fit:cover;border-radius:8px;margin-bottom:12px;border:1px solid #334155;' />
+        
+        <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;'>
+          <h2 style='color:#38bdf8;margin:0;font-size:18px;'>${region.name}</h2>
+        </div>
+        <div style='margin-bottom:12px;'>$riskBadgeHtml</div>
+
+        <p style='color:#94a3b8;font-size:12px;margin:0 0 12px;line-height:1.4;'><b>Active Era:</b> $activeYear (${era.label}) &bull; Scientific projection under IPCC AR6 SSP3-7.0</p>
+        
+        <!-- Multi-Era Metrics Matrix -->
+        <table style='border-collapse:collapse;width:100%;font-size:12px;margin-bottom:12px;'>
+          <tr style='background:#1e293b;color:#e2e8f0;'>
+            <th style='padding:7px 8px;text-align:left;'>Era / Year</th>
+            <th style='padding:7px 8px;text-align:center;'>Temp &Delta;</th>
+            <th style='padding:7px 8px;text-align:center;'>$statHeader</th>
+            <th style='padding:7px 8px;text-align:center;'>Impact</th>
           </tr>
-          <tr style='background:${era.label == '1900' ? '#1a472a' : '#0d1117'};color:#2ecc71'>
-            <td style='padding:6px 8px'>${era.label == '1900' ? '\u25B6 ' : ''}1900</td>
-            <td style='padding:6px 8px;text-align:center'>+${pastTemp}\u00B0C</td>
-            <td style='padding:6px 8px;text-align:center'>$pastStat</td>
-            <td style='padding:6px 8px;text-align:center'>\u2014</td>
+          <tr style='background:${activeYear == 1900 ? '#14532d' : '#0f172a'};color:#4ade80;'>
+            <td style='padding:6px 8px;'>${activeYear == 1900 ? '&#9654; ' : ''}1900 (Baseline)</td>
+            <td style='padding:6px 8px;text-align:center;'>+${pastTemp.toStringAsFixed(1)}&deg;C</td>
+            <td style='padding:6px 8px;text-align:center;'>$pastStat</td>
+            <td style='padding:6px 8px;text-align:center;'>Stable</td>
           </tr>
-          <tr style='background:${era.label == '2026' ? '#2a3a1a' : '#0d1117'};color:#f1c40f'>
-            <td style='padding:6px 8px'>${era.label == '2026' ? '\u25B6 ' : ''}<b>2026</b></td>
-            <td style='padding:6px 8px;text-align:center'><b>+${nowTemp}\u00B0C</b></td>
-            <td style='padding:6px 8px;text-align:center'><b>$nowStat</b></td>
-            <td style='padding:6px 8px;text-align:center'>${region.category == 'forest' || region.category == 'glacier' ? '\u2193' : '\u2191'}</td>
+          ${isSpecialYear ? '''
+          <tr style='background:#1e3a8a;color:#38bdf8;font-weight:bold;'>
+            <td style='padding:6px 8px;'>&#9654; $activeYear (Active)</td>
+            <td style='padding:6px 8px;text-align:center;'>+${activeTemp.toStringAsFixed(1)}&deg;C</td>
+            <td style='padding:6px 8px;text-align:center;'>$activeStat</td>
+            <td style='padding:6px 8px;text-align:center;'>&#9733; Active</td>
           </tr>
-          <tr style='background:${era.label == '2100' ? '#2a1a1a' : '#0d1117'};color:#e74c3c'>
-            <td style='padding:6px 8px'>${era.label == '2100' ? '\u25B6 ' : ''}<b>2100</b></td>
-            <td style='padding:6px 8px;text-align:center'><b>+${futureTemp}\u00B0C</b></td>
-            <td style='padding:6px 8px;text-align:center'><b>$futureStat</b></td>
-            <td style='padding:6px 8px;text-align:center'>${region.category == 'forest' || region.category == 'glacier' ? '\u2193\u2193' : '\u2191\u2191'}</td>
+          ''' : ''}
+          <tr style='background:${activeYear == 2026 ? '#365314' : '#0f172a'};color:#facc15;'>
+            <td style='padding:6px 8px;'>${activeYear == 2026 ? '&#9654; ' : ''}<b>2026 (Present)</b></td>
+            <td style='padding:6px 8px;text-align:center;'><b>+${nowTemp.toStringAsFixed(1)}&deg;C</b></td>
+            <td style='padding:6px 8px;text-align:center;'><b>$nowStat</b></td>
+            <td style='padding:6px 8px;text-align:center;'>${region.category == 'forest' || region.category == 'glacier' ? '&#8675; Declining' : '&#8673; Rising'}</td>
+          </tr>
+          <tr style='background:${activeYear == 2100 ? '#7f1d1d' : '#0f172a'};color:#f87171;'>
+            <td style='padding:6px 8px;'>${activeYear == 2100 ? '&#9654; ' : ''}<b>2100 (Projected)</b></td>
+            <td style='padding:6px 8px;text-align:center;'><b>+${futureTemp.toStringAsFixed(1)}&deg;C</b></td>
+            <td style='padding:6px 8px;text-align:center;'><b>$futureStat</b></td>
+            <td style='padding:6px 8px;text-align:center;'>${region.category == 'forest' || region.category == 'glacier' ? '&#8675;&#8675; Severe' : '&#8673;&#8673; Severe'}</td>
           </tr>
         </table>
-        <div style='margin-top:10px;padding:8px 10px;background:#1a1a2e;border-left:3px solid #3498db;border-radius:3px'>
-          <b style='color:#3498db'>What This Means:</b><br/>
-          <span style='color:#bdc3c7;font-size:12px'>$description</span>
+
+        <!-- Narrative Context -->
+        <div style='margin-bottom:10px;padding:10px;background:#1e293b;border-left:4px solid #38bdf8;border-radius:4px;'>
+          <b style='color:#38bdf8;font-size:13px;'>Scientific Narrative Analysis:</b><br/>
+          <span style='color:#cbd5e1;font-size:12px;line-height:1.4;'>$description</span>
         </div>
-        <p style='color:#7f8c8d;font-size:10px;margin-top:8px'>
-          <i>Source: ${region.category == 'aqi' ? 'IQAir/WHO (2026); illustrative scenario (2100)' : 'IPCC AR6 SSP3-7.0'}</i>
+
+        <!-- Mitigation & Adaptation Plan -->
+        <div style='margin-bottom:10px;padding:10px;background:#142834;border-left:4px solid #22c55e;border-radius:4px;'>
+          <b style='color:#22c55e;font-size:13px;'>Climate Resilience & Mitigation Plan:</b><br/>
+          <span style='color:#cbd5e1;font-size:12px;line-height:1.4;'>$actionGuideHtml</span>
+        </div>
+
+        <p style='color:#64748b;font-size:10px;margin-top:8px;line-height:1.3;'>
+          <i>Data Sources: ${region.category == 'aqi' ? 'OpenAQ / WHO (2026); IPCC AR6 Scenarios (2100)' : 'IPCC AR6 Working Group I/II (SSP3-7.0) &bull; NASA Earthdata GIBS &bull; NOAA CDO'}</i>
         </p>
         </div>
         $tempLine
@@ -1313,17 +1486,113 @@ class LgService {
       </Point>
     </Placemark>
 
+    <!-- Sub-Region Localized Monitoring Station Network -->
+    ${_buildSubStationPlacemarks(region, era, activeYear)}
+
+    <!-- Category Visual Geometry, 3D Data Bars & Floating Banners -->
     ${_buildCategoryLayer(region, era, stats, regionData)}
 
   </Document>
 </kml>''';
   }
 
-  // Traffic-light severity colors used consistently across categories
+  /// Builds localized monitoring sub-station placemarks for each region.
+  String _buildSubStationPlacemarks(ClimateRegion region, ClimateEra era, int activeYear) {
+    final sb = StringBuffer();
+    sb.writeln('<Folder><name>${LG3DVisuals.escapeXmlText(region.name)} Monitoring Network</name><visibility>1</visibility>');
+
+    final stations = switch (region.id) {
+      'arctic' => [
+        {'name': 'Svalbard Atmospheric Observatory', 'dLat': 0.35, 'dLon': -0.40, 'type': 'Ice Core & Greenhouse Gas Station'},
+        {'name': 'Greenland Summit Drill Camp', 'dLat': -0.30, 'dLon': 0.45, 'type': 'Glacier Thickness Monitor'},
+        {'name': 'Beaufort Sea Ice Buoy Post', 'dLat': 0.25, 'dLon': 0.50, 'type': 'Ocean Heat & Ice Drift Buoy'},
+      ],
+      'himalaya' => [
+        {'name': 'Everest Glacier Weather Post', 'dLat': 0.20, 'dLon': 0.25, 'type': 'High-Altitude Automated Weather Station'},
+        {'name': 'Gangotri Melt Hydrology Post', 'dLat': -0.25, 'dLon': -0.35, 'type': 'Glacial Lake Outburst Sensor'},
+        {'name': 'Karakoram Anomaly Research Camp', 'dLat': 0.35, 'dLon': -0.45, 'type': 'Mass Balance Monitoring Post'},
+      ],
+      'amazon' => [
+        {'name': 'Manaus Canopy Research Tower', 'dLat': -0.15, 'dLon': 0.25, 'type': 'CO2 Flux & Canopy Photosynthesis Tower'},
+        {'name': 'Deforestation Frontier Post', 'dLat': -0.35, 'dLon': -0.30, 'type': 'Satellite Loss Ground-Truth Station'},
+        {'name': 'Tapajós Biodiversity Reserve', 'dLat': 0.25, 'dLon': -0.20, 'type': 'Tropical Forest Micro-Climate Sensor'},
+      ],
+      'pacific' => [
+        {'name': 'Tarawa Atoll Tide Gauge Post', 'dLat': 0.20, 'dLon': -0.25, 'type': 'Continuous Sea Level & Wave Height Gauge'},
+        {'name': 'Funafuti Aquifer Well Station', 'dLat': -0.25, 'dLon': 0.30, 'type': 'Freshwater Salinity Sensor'},
+        {'name': 'Pacific Ocean Deep Buoy Array', 'dLat': -0.15, 'dLon': -0.35, 'type': 'Marine Heatwave & Coral Bleaching Monitor'},
+      ],
+      'maldives' => [
+        {'name': 'Malé Island Tide Gauge Station', 'dLat': 0.15, 'dLon': -0.15, 'type': 'High-Precision Tsunami & Sea Level Gauge'},
+        {'name': 'Hulhumalé Reclamation Monitor', 'dLat': 0.25, 'dLon': 0.20, 'type': 'Coastal Erosion & Wall Sensor'},
+        {'name': 'Ari Atoll Coral Bleaching Post', 'dLat': -0.20, 'dLon': -0.25, 'type': 'Sub-Surface Ocean Temperature Array'},
+      ],
+      'sahara' => [
+        {'name': 'Ahaggar Thermal Weather Center', 'dLat': 0.30, 'dLon': -0.35, 'type': 'Extreme Heatwave & Solar Radiation Station'},
+        {'name': 'Sahel Desertification Frontier Post', 'dLat': -0.35, 'dLon': 0.25, 'type': 'Soil Moisture & Dune Encroachment Sensor'},
+        {'name': 'Tuat Aquifer Oasis Monitor', 'dLat': 0.15, 'dLon': 0.35, 'type': 'Underground Water Table Depletion Sensor'},
+      ],
+      'delhi' => [
+        {'name': 'Anand Vihar AQI Monitoring Post', 'dLat': 0.15, 'dLon': 0.20, 'type': 'PM2.5 / PM10 / NO2 Real-Time Sensor'},
+        {'name': 'Yamuna Basin Water Quality Post', 'dLat': -0.15, 'dLon': -0.15, 'type': 'Hydrology & River Thermal Sensor'},
+        {'name': 'IGI Weather & Urban Heat Post', 'dLat': -0.20, 'dLon': -0.25, 'type': 'Urban Heat Island Micro-Climate Station'},
+      ],
+      _ => [
+        {'name': 'Regional Monitoring Station Alpha', 'dLat': 0.20, 'dLon': -0.20, 'type': 'Regional Climate Sensor'},
+        {'name': 'Regional Monitoring Station Beta', 'dLat': -0.20, 'dLon': 0.20, 'type': 'Environmental Observation Post'},
+      ],
+    };
+
+    for (final st in stations) {
+      final stLat = region.latitude + (st['dLat'] as double);
+      final stLon = region.longitude + (st['dLon'] as double);
+      final stName = st['name'] as String;
+      final stType = st['type'] as String;
+
+      sb.writeln('''
+      <Placemark>
+        <name>${LG3DVisuals.escapeXmlText(stName)}</name>
+        <visibility>1</visibility>
+        <Style>
+          <IconStyle>
+            <scale>0.95</scale>
+            <Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon>
+            <color>ff00e5ff</color>
+          </IconStyle>
+          <LabelStyle>
+            <color>ff00e5ff</color>
+            <scale>1.1</scale>
+          </LabelStyle>
+        </Style>
+        <description><![CDATA[
+          <div style='font-family:Helvetica,Arial,sans-serif;max-width:320px;background:#0f172a;color:#f8fafc;padding:10px;border-radius:8px;'>
+            <h4 style='color:#00e5ff;margin:0 0 4px;'>$stName</h4>
+            <p style='color:#94a3b8;font-size:11px;margin:0 0 8px;'><b>Station Type:</b> $stType</p>
+            <div style='background:#1e293b;padding:8px;border-radius:4px;font-size:11px;color:#cbd5e1;'>
+              &bull; <b>Active Year:</b> $activeYear<br/>
+              &bull; <b>Coordinates:</b> ${stLat.toStringAsFixed(4)}&deg;, ${stLon.toStringAsFixed(4)}&deg;<br/>
+              &bull; <b>Status:</b> Telemetry Operational (Real-Time Synchronized)
+            </div>
+          </div>
+        ]]></description>
+        <Point>
+          <coordinates>$stLon,$stLat,0</coordinates>
+        </Point>
+      </Placemark>''');
+    }
+
+    sb.writeln('</Folder>');
+    return sb.toString();
+  }
+
+  // 6-color spectrum across timeline eras
   String _severityColorRgb(ClimateEra era) => switch (era) {
-    ClimateEra.preindustrial1900 => '22c55e',
-    ClimateEra.present2026       => 'facc15',
-    ClimateEra.projected2100     => 'ef4444',
+    ClimateEra.preindustrial1900 => '22c55e', // Green
+    ClimateEra.midCentury1950    => '84cc16', // Light Green
+    ClimateEra.lateCentury1980   => 'eab308', // Light Yellow
+    ClimateEra.present2026       => 'facc15', // Yellow
+    ClimateEra.midProjection2060 => 'f97316', // Orange
+    ClimateEra.projected2100     => 'ef4444', // Red
   };
 
   // Converts alpha + RRGGBB into KML's required AABBGGRR ordering
@@ -1338,8 +1607,11 @@ class LgService {
   String _severityBlurb(String category, ClimateEra era, Map<String, String> eraStats) {
     final trend = switch (era) {
       ClimateEra.preindustrial1900 => 'Pre-industrial baseline — before major human-driven warming.',
-      ClimateEra.present2026       => 'Current conditions — actively worsening.',
-      ClimateEra.projected2100     => 'Projected worst case under continued high emissions (IPCC SSP3-7.0).',
+      ClimateEra.midCentury1950    => 'Mid 20th Century — post-WWII global industrial acceleration.',
+      ClimateEra.lateCentury1980   => 'Late 20th Century — rapid growth in greenhouse gas emissions.',
+      ClimateEra.present2026       => 'Current conditions — actively worsening global climate impact.',
+      ClimateEra.midProjection2060 => 'Mid 21st Century — projected severe impacts under continued emissions.',
+      ClimateEra.projected2100     => 'Late 21st Century — projected extreme end-of-century scenario.',
     };
     final metric = switch (category) {
       'glacier'  => 'Ice extent: ${eraStats['ice_extent']}',
@@ -1422,18 +1694,24 @@ class LgService {
 
   String _heatPolygon(ClimateRegion region, ClimateEra era, Map<String, String> eraStats) {
     final opacity = switch (era) {
-      ClimateEra.preindustrial1900 => '55', 
-      ClimateEra.present2026       => '99', 
-      ClimateEra.projected2100     => 'dd', 
+      ClimateEra.preindustrial1900 => '44',
+      ClimateEra.midCentury1950    => '66',
+      ClimateEra.lateCentury1980   => '88',
+      ClimateEra.present2026       => 'aa',
+      ClimateEra.midProjection2060 => 'cc',
+      ClimateEra.projected2100     => 'ee',
     };
     final color = _kmlColorAbgr(opacity, _severityColorRgb(era));
     final outlineColor = _kmlColorAbgr('ff', _severityColorRgb(era));
     final glowColor = _kmlColorAbgr('22', _severityColorRgb(era));
     // Heat zone expands
     final radius = switch (era) {
-      ClimateEra.preindustrial1900 => 0.5,
-      ClimateEra.present2026       => 1.0,
-      ClimateEra.projected2100     => 1.8,
+      ClimateEra.preindustrial1900 => 0.3,
+      ClimateEra.midCentury1950    => 0.5,
+      ClimateEra.lateCentury1980   => 0.7,
+      ClimateEra.present2026       => 0.9,
+      ClimateEra.midProjection2060 => 1.2,
+      ClimateEra.projected2100     => 1.5,
     };
     
     final coords = _generateIrregularPolygon(region.latitude, region.longitude, radius, 0.2, 42);
@@ -1479,9 +1757,12 @@ class LgService {
 
   String _glacierPolygon(ClimateRegion region, ClimateEra era, Map<String, String> eraStats) {
     final opacity = switch (era) {
-      ClimateEra.preindustrial1900 => 'aa',
-      ClimateEra.present2026       => '77',
-      ClimateEra.projected2100     => '33',
+      ClimateEra.preindustrial1900 => 'bb',
+      ClimateEra.midCentury1950    => '99',
+      ClimateEra.lateCentury1980   => '77',
+      ClimateEra.present2026       => '55',
+      ClimateEra.midProjection2060 => '33',
+      ClimateEra.projected2100     => '22',
     };
     final color = _kmlColorAbgr(opacity, _severityColorRgb(era));
     final outlineColor = _kmlColorAbgr('ff', _severityColorRgb(era));
@@ -1489,9 +1770,12 @@ class LgService {
     
     // Glacier shrinks over time
     final radius = switch (era) {
-      ClimateEra.preindustrial1900 => 0.4,
-      ClimateEra.present2026       => 0.15,
-      ClimateEra.projected2100     => 0.05,
+      ClimateEra.preindustrial1900 => 0.5,
+      ClimateEra.midCentury1950    => 0.4,
+      ClimateEra.lateCentury1980   => 0.3,
+      ClimateEra.present2026       => 0.2,
+      ClimateEra.midProjection2060 => 0.1,
+      ClimateEra.projected2100     => 0.04,
     };
     
     final coords = _generateIrregularPolygon(region.latitude, region.longitude, radius, 0.1, 88);
@@ -1537,18 +1821,24 @@ class LgService {
 
   String _seaLevelPolygon(ClimateRegion region, ClimateEra era, Map<String, String> eraStats) {
     final opacity = switch (era) {
-      ClimateEra.preindustrial1900 => '55',
-      ClimateEra.present2026       => '88',
-      ClimateEra.projected2100     => 'cc',
+      ClimateEra.preindustrial1900 => '44',
+      ClimateEra.midCentury1950    => '66',
+      ClimateEra.lateCentury1980   => '88',
+      ClimateEra.present2026       => 'aa',
+      ClimateEra.midProjection2060 => 'cc',
+      ClimateEra.projected2100     => 'ee',
     };
     final color = _kmlColorAbgr(opacity, _severityColorRgb(era));
     final outlineColor = _kmlColorAbgr('ff', _severityColorRgb(era));
     final glowColor = _kmlColorAbgr('22', _severityColorRgb(era));
 
     final (offsetDeg, radius) = switch (era) {
-      ClimateEra.preindustrial1900 => (0.22, 0.05),
-      ClimateEra.present2026       => (0.10, 0.15),
-      ClimateEra.projected2100     => (0.00, 0.35),
+      ClimateEra.preindustrial1900 => (0.25, 0.05),
+      ClimateEra.midCentury1950    => (0.20, 0.09),
+      ClimateEra.lateCentury1980   => (0.15, 0.14),
+      ClimateEra.present2026       => (0.10, 0.20),
+      ClimateEra.midProjection2060 => (0.05, 0.28),
+      ClimateEra.projected2100     => (0.00, 0.38),
     };
     const bearingRad = 2.356;
     final centerLat = region.latitude + offsetDeg * math.sin(bearingRad);
@@ -1601,9 +1891,12 @@ class LgService {
 
   String _forestPolygon(ClimateRegion region, ClimateEra era, Map<String, String> eraStats) {
     final opacity = switch (era) {
-      ClimateEra.preindustrial1900 => 'aa',
-      ClimateEra.present2026       => '77',
-      ClimateEra.projected2100     => '44',
+      ClimateEra.preindustrial1900 => 'bb',
+      ClimateEra.midCentury1950    => '99',
+      ClimateEra.lateCentury1980   => '77',
+      ClimateEra.present2026       => '55',
+      ClimateEra.midProjection2060 => '33',
+      ClimateEra.projected2100     => '22',
     };
     final color = _kmlColorAbgr(opacity, _severityColorRgb(era));
     final outlineColor = _kmlColorAbgr('ff', _severityColorRgb(era));
@@ -1611,9 +1904,12 @@ class LgService {
     
     // Forest shrinks
     final radius = switch (era) {
-      ClimateEra.preindustrial1900 => 0.8,
-      ClimateEra.present2026       => 0.5,
-      ClimateEra.projected2100     => 0.2,
+      ClimateEra.preindustrial1900 => 0.9,
+      ClimateEra.midCentury1950    => 0.75,
+      ClimateEra.lateCentury1980   => 0.6,
+      ClimateEra.present2026       => 0.45,
+      ClimateEra.midProjection2060 => 0.3,
+      ClimateEra.projected2100     => 0.15,
     };
     
     final coords = _generateIrregularPolygon(region.latitude, region.longitude, radius, 0.2, 55);
@@ -1659,17 +1955,23 @@ class LgService {
 
   String _aqiPolygon(ClimateRegion region, ClimateEra era, Map<String, String> eraStats) {
     final opacity = switch (era) {
-      ClimateEra.preindustrial1900 => '55',
-      ClimateEra.present2026       => '99',
-      ClimateEra.projected2100     => 'dd',
+      ClimateEra.preindustrial1900 => '44',
+      ClimateEra.midCentury1950    => '66',
+      ClimateEra.lateCentury1980   => '88',
+      ClimateEra.present2026       => 'aa',
+      ClimateEra.midProjection2060 => 'cc',
+      ClimateEra.projected2100     => 'ee',
     };
     final color = _kmlColorAbgr(opacity, _severityColorRgb(era));
     final outlineColor = _kmlColorAbgr('ff', _severityColorRgb(era));
     final glowColor = _kmlColorAbgr('22', _severityColorRgb(era));
 
     final radius = switch (era) {
-      ClimateEra.preindustrial1900 => 0.3,
-      ClimateEra.present2026       => 0.6,
+      ClimateEra.preindustrial1900 => 0.25,
+      ClimateEra.midCentury1950    => 0.4,
+      ClimateEra.lateCentury1980   => 0.55,
+      ClimateEra.present2026       => 0.7,
+      ClimateEra.midProjection2060 => 0.85,
       ClimateEra.projected2100     => 1.0,
     };
 
@@ -1721,20 +2023,30 @@ class LgService {
   /// Returns a KML <TimeSpan> element so Google Earth's timeline slider
   /// toggles visibility of each era's geometry, labels, and data bars.
   String _timeSpanKml(ClimateEra era) => switch (era) {
-    ClimateEra.preindustrial1900 => '<TimeSpan><begin>1850</begin><end>1949</end></TimeSpan>',
-    ClimateEra.present2026       => '<TimeSpan><begin>1950</begin><end>2075</end></TimeSpan>',
-    ClimateEra.projected2100     => '<TimeSpan><begin>2076</begin><end>2150</end></TimeSpan>',
+    ClimateEra.preindustrial1900 => '<TimeSpan><begin>1850-01-01T00:00:00Z</begin><end>1924-12-31T23:59:59Z</end></TimeSpan>',
+    ClimateEra.midCentury1950    => '<TimeSpan><begin>1925-01-01T00:00:00Z</begin><end>1964-12-31T23:59:59Z</end></TimeSpan>',
+    ClimateEra.lateCentury1980   => '<TimeSpan><begin>1965-01-01T00:00:00Z</begin><end>1999-12-31T23:59:59Z</end></TimeSpan>',
+    ClimateEra.present2026       => '<TimeSpan><begin>2000-01-01T00:00:00Z</begin><end>2049-12-31T23:59:59Z</end></TimeSpan>',
+    ClimateEra.midProjection2060 => '<TimeSpan><begin>2050-01-01T00:00:00Z</begin><end>2084-12-31T23:59:59Z</end></TimeSpan>',
+    ClimateEra.projected2100     => '<TimeSpan><begin>2085-01-01T00:00:00Z</begin><end>2150-12-31T23:59:59Z</end></TimeSpan>',
   };
 
   /// Returns the primary display metric string for a category/era.
   String _getCategoryMetric(String category, ClimateEra era, IpccRegionData? regionData) {
     final year = int.parse(era.label);
+    if (regionData == null) return '';
+    final temp = _interpolateMap(regionData.localTempAnomaly, year);
+    final ice = _interpolateMap(regionData.iceExtentKm2, year);
+    final sea = _interpolateMap(regionData.seaLevelMm, year);
+    final forest = _interpolateMap(regionData.forestCoverPct, year);
+    final aqi = _interpolateMap(regionData.aqiIndex, year);
+
     return switch (category) {
-      'glacier'  => '${((regionData?.iceExtentKm2[year] ?? 0.0) / 1000000).toStringAsFixed(1)}M km\u00B2',
-      'sealevel' => '${regionData?.seaLevelMm[year] ?? 0} mm rise',
-      'forest'   => '${regionData?.forestCoverPct[year] ?? 100}% cover',
-      'heat'     => '+${regionData?.localTempAnomaly[year] ?? 0.0}\u00B0C',
-      'aqi'      => 'AQI ${(regionData?.aqiIndex[year] ?? 0).toStringAsFixed(0)}',
+      'glacier'  => '${(ice / 1000000.0).toStringAsFixed(1)}M km\u00B2',
+      'sealevel' => '${sea.toStringAsFixed(0)} mm rise',
+      'forest'   => '${forest.toStringAsFixed(1)}% cover',
+      'heat'     => '+${temp.toStringAsFixed(1)}\u00B0C',
+      'aqi'      => 'AQI ${aqi.toStringAsFixed(0)}',
       _          => '',
     };
   }
@@ -1747,11 +2059,14 @@ class LgService {
     final metric = _getCategoryMetric(region.category, era, regionData);
     final color = _kmlColorAbgr('ff', _severityColorRgb(era));
 
-    // Fan out labels so all 3 eras are readable simultaneously
+    // Fan out labels so all 6 eras are readable simultaneously
     final (latOff, lonOff) = switch (era) {
-      ClimateEra.preindustrial1900 => (-0.25, -0.35),
-      ClimateEra.present2026       => (0.0,   0.45),
-      ClimateEra.projected2100     => (0.25, -0.35),
+      ClimateEra.preindustrial1900 => (-0.30, -0.40),
+      ClimateEra.midCentury1950    => (-0.15, -0.20),
+      ClimateEra.lateCentury1980   => (0.00,  -0.40),
+      ClimateEra.present2026       => (0.00,   0.45),
+      ClimateEra.midProjection2060 => (0.15,   0.25),
+      ClimateEra.projected2100     => (0.30,  -0.35),
     };
 
     final labelLat = region.latitude + latOff;
@@ -1803,11 +2118,14 @@ class LgService {
     final edgeColor = _kmlColorAbgr('ff', _severityColorRgb(era));
     final metric = _getCategoryMetric(region.category, era, regionData);
 
-    // Place bars side by side so all 3 eras are visible together
+    // Place bars side by side so all 6 eras are visible together
     final lonOff = switch (era) {
-      ClimateEra.preindustrial1900 => -0.15,
-      ClimateEra.present2026       =>  0.0,
-      ClimateEra.projected2100     =>  0.15,
+      ClimateEra.preindustrial1900 => -0.25,
+      ClimateEra.midCentury1950    => -0.15,
+      ClimateEra.lateCentury1980   => -0.05,
+      ClimateEra.present2026       =>  0.05,
+      ClimateEra.midProjection2060 =>  0.15,
+      ClimateEra.projected2100     =>  0.25,
     };
 
     final barLat = region.latitude - 0.4;
@@ -1845,6 +2163,26 @@ class LgService {
           </LinearRing>
         </outerBoundaryIs>
       </Polygon>
+    </Placemark>
+    <!-- Floating 3D Value Banner above Column -->
+    <Placemark>
+      <name>${LG3DVisuals.escapeXmlText(era.label)}: $metric</name>
+      <visibility>1</visibility>
+      <Style>
+        <IconStyle>
+          <scale>0.6</scale>
+          <Icon><href>http://maps.google.com/mapfiles/kml/shapes/donut.png</href></Icon>
+          <color>$edgeColor</color>
+        </IconStyle>
+        <LabelStyle>
+          <color>$edgeColor</color>
+          <scale>1.2</scale>
+        </LabelStyle>
+      </Style>
+      <Point>
+        <altitudeMode>relativeToGround</altitudeMode>
+        <coordinates>$barLon,$barLat,$h</coordinates>
+      </Point>
     </Placemark>''';
   }
 

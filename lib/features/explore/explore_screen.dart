@@ -11,6 +11,9 @@ import 'package:climate_storyteller/widgets/lg_map_controller_widget.dart';
 import 'package:climate_storyteller/features/lg_connection/lg_service.dart';
 import 'climate_region.dart';
 import 'climate_year_slider.dart';
+import 'package:climate_storyteller/features/narrator/narration_result.dart';
+import 'package:climate_storyteller/core/storage/secure_storage_service.dart';
+import 'package:climate_storyteller/features/explore/climate_era.dart';
 
 class ExploreScreen extends StatefulWidget {
   const ExploreScreen({super.key});
@@ -30,6 +33,11 @@ class _ExploreScreenState extends State<ExploreScreen> {
   bool _isProgrammaticMove = false;
   StreamSubscription<LgViewpoint>? _vpSub;
 
+  bool _isNarrating = false;
+  bool _isNarrationLoading = false;
+  bool _isNarrationPaused = false;
+  String? _narrationText;
+
   @override
   void initState() {
     super.initState();
@@ -48,6 +56,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
   void dispose() {
     _vpSub?.cancel();
     DI.lgService.stopLgViewpointPolling();
+    DI.narratorService.stop();
     super.dispose();
   }
 
@@ -138,6 +147,301 @@ class _ExploreScreenState extends State<ExploreScreen> {
       LatLng(region.latitude, region.longitude), 4,
     );
     _launchRegionOnLG(region, _selectedYear);
+    _startNarrationForRegion(region);
+  }
+
+  Future<void> _startNarrationForRegion(ClimateRegion region) async {
+    final apiKey = await SecureStorageService.instance.getGeminiKey();
+    if (apiKey == null || apiKey.trim().isEmpty) {
+      if (mounted) {
+        _showGeminiKeyRequiredDialog(context, region);
+      }
+      return;
+    }
+
+    await DI.narratorService.stop();
+
+    if (!mounted) return;
+
+    setState(() {
+      _isNarrating = true;
+      _isNarrationLoading = true;
+      _narrationText = null;
+    });
+
+    try {
+      final era = switch (_selectedYear) {
+        <= 1924 => ClimateEra.preindustrial1900,
+        <= 1964 => ClimateEra.midCentury1950,
+        <= 1999 => ClimateEra.lateCentury1980,
+        <= 2049 => ClimateEra.present2026,
+        <= 2084 => ClimateEra.midProjection2060,
+        _       => ClimateEra.projected2100,
+      };
+      final result = await DI.narratorService.generateNarration(
+        region: region,
+        era: era,
+        style: VoiceStyle.natural,
+      );
+
+      if (!mounted) return;
+
+      if (result.hasError) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(result.errorMessage ?? 'Failed to generate narration'),
+          backgroundColor: AppColors.critical,
+        ));
+        setState(() {
+          _isNarrating = false;
+          _isNarrationLoading = false;
+        });
+        return;
+      }
+
+      setState(() {
+        _narrationText = result.text;
+        _isNarrationLoading = false;
+      });
+
+      if (result.text != null && result.text!.isNotEmpty) {
+        await DI.narratorService.speak(result.text!, style: VoiceStyle.natural);
+        if (mounted) {
+          setState(() {
+            _isNarrating = false;
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Narration error: $e'),
+          backgroundColor: AppColors.critical,
+        ));
+        setState(() {
+          _isNarrating = false;
+          _isNarrationLoading = false;
+        });
+      }
+    }
+  }
+
+  void _showGeminiKeyRequiredDialog(BuildContext context, ClimateRegion region) {
+    final keyController = TextEditingController();
+    bool obscureText = true;
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final colors = AppColors.of(context);
+          return AlertDialog(
+            backgroundColor: colors.bg2,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(color: colors.cardBorder),
+            ),
+            title: Row(
+              children: [
+                const Icon(Icons.key_rounded, color: AppColors.warning, size: 22),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Gemini API Key Required',
+                    style: TextStyle(
+                      color: colors.textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Enter your Gemini API key to start AI narration for ${region.name}.',
+                  style: TextStyle(color: colors.textSecondary, fontSize: 13),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: keyController,
+                  obscureText: obscureText,
+                  style: TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 13,
+                    color: colors.textPrimary,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'AIza••••••••••••',
+                    hintStyle: TextStyle(color: colors.textMuted),
+                    filled: true,
+                    fillColor: colors.bg3,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: colors.cardBorder),
+                    ),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        obscureText ? Icons.visibility_off : Icons.visibility,
+                        color: colors.textMuted,
+                        size: 18,
+                      ),
+                      onPressed: () {
+                        setDialogState(() => obscureText = !obscureText);
+                      },
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Get a free key at aistudio.google.com',
+                  style: TextStyle(color: colors.textMuted, fontSize: 11),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogCtx),
+                child: Text('Cancel', style: TextStyle(color: colors.textMuted)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                onPressed: () async {
+                  final key = keyController.text.trim();
+                  if (key.isNotEmpty) {
+                    await SecureStorageService.instance.saveGeminiKey(key);
+                    if (context.mounted) {
+                      Navigator.pop(dialogCtx);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Gemini API key saved! Starting narration...'),
+                          backgroundColor: AppColors.good,
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
+                      _startNarrationForRegion(region);
+                    }
+                  }
+                },
+                child: const Text('Save Key & Start Narration', style: TextStyle(color: Colors.white)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildNarrationSection(AppColorScheme colors, ClimateRegion region) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: colors.bg3,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.cardBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                _isNarrating
+                    ? Icons.volume_up
+                    : (_isNarrationPaused ? Icons.pause_circle_filled : Icons.record_voice_over),
+                color: _isNarrating
+                    ? AppColors.good
+                    : (_isNarrationPaused ? AppColors.warning : AppColors.primary),
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _isNarrationLoading
+                      ? 'Generating unique AI narration...'
+                      : (_isNarrating
+                          ? 'AI Narration Playing (${region.name})'
+                          : (_isNarrationPaused
+                              ? 'Narration Paused'
+                              : 'AI Storyteller Narration')),
+                  style: TextStyle(
+                    color: colors.textPrimary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              if (_isNarrationLoading)
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                )
+              else if (_isNarrating)
+                ActionChip(
+                  avatar: const Icon(Icons.pause, color: Colors.white, size: 14),
+                  label: const Text('Stop Narration', style: TextStyle(color: Colors.white, fontSize: 11)),
+                  backgroundColor: AppColors.critical,
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  onPressed: () async {
+                    await DI.narratorService.stop();
+                    if (mounted) {
+                      setState(() {
+                        _isNarrating = false;
+                        _isNarrationPaused = true;
+                      });
+                    }
+                  },
+                )
+              else if (_isNarrationPaused && DI.narratorService.pausedOffset > 0)
+                ActionChip(
+                  avatar: const Icon(Icons.play_arrow, color: Colors.white, size: 14),
+                  label: const Text('Resume Narration', style: TextStyle(color: Colors.white, fontSize: 11)),
+                  backgroundColor: AppColors.good,
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  onPressed: () async {
+                    final text = DI.narratorService.lastSpokenText ?? _narrationText;
+                    if (text != null && text.isNotEmpty) {
+                      setState(() {
+                        _isNarrating = true;
+                        _isNarrationPaused = false;
+                      });
+                      await DI.narratorService.speak(
+                        text,
+                        style: VoiceStyle.natural,
+                        startFromOffset: DI.narratorService.pausedOffset,
+                      );
+                      if (mounted) {
+                        setState(() => _isNarrating = false);
+                      }
+                    } else {
+                      _startNarrationForRegion(region);
+                    }
+                  },
+                )
+              else
+                ActionChip(
+                  avatar: const Icon(Icons.play_arrow, color: Colors.white, size: 14),
+                  label: const Text('Start Narration', style: TextStyle(color: Colors.white, fontSize: 11)),
+                  backgroundColor: AppColors.primary,
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  onPressed: () => _startNarrationForRegion(region),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   void _showEnlargedImage(BuildContext context, ClimateRegion region) {
@@ -209,14 +513,20 @@ class _ExploreScreenState extends State<ExploreScreen> {
       return;
     }
 
+    lg.stopOrbit();
     setState(() => _isLoadingKml = true);
     try {
+      // 1. Fly to target region coordinate FIRST so Google Earth camera reaches destination
       await lg.flyTo(
         latitude: region.latitude,
         longitude: region.longitude,
         altitude: region.altitude,
       );
 
+      // 2. Wait for Google Earth's flight to reach desired coordinate
+      await Future.delayed(const Duration(milliseconds: 2500));
+
+      // 3. Build & upload KML for the region onto LG (KML loads)
       final kmlPath = await lg.buildKmlForYear(
         region: region,
         year: year,
@@ -225,23 +535,41 @@ class _ExploreScreenState extends State<ExploreScreen> {
       final filename = '${region.id}_year_${year}_${region.category}.kml';
 
       await lg.sendKmlRealtime(filename, kmlContent: content);
+      await lg.sendTimeQuery(
+        year,
+        latitude: region.latitude,
+        longitude: region.longitude,
+        altitude: region.altitude,
+      );
 
-      await Future.delayed(const Duration(milliseconds: 3500));
+      // 4. Set KML loading as completed once KML is sent to LG
+      if (mounted) {
+        setState(() => _isLoadingKml = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Loaded ${region.name} KML on LG! Orbit starting in 7s...'),
+          backgroundColor: AppColors.primary.withValues(alpha: 0.9),
+          duration: const Duration(seconds: 3),
+        ));
+      }
 
-      if (mounted && _selected?.id == region.id) {
+      // 5. Wait 7 seconds AFTER the KML is loaded before starting orbit
+      await Future.delayed(const Duration(seconds: 7));
+
+      // 6. Start 3D orbit rotation loop after 7 seconds delay (if still on this region)
+      if (mounted && _selected?.id == region.id && lg.state.isConnected) {
         await lg.startOrbit(
           latitude: region.latitude,
           longitude: region.longitude,
           altitude: region.altitude,
+          flightDelay: Duration.zero,
         );
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Loaded ${region.name} KML & Auto-Orbiting on LG!'),
-          backgroundColor: AppColors.primary.withValues(alpha: 0.9),
-          duration: const Duration(seconds: 2),
-        ));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Started 3D Orbit for ${region.name} on LG!'),
+            backgroundColor: AppColors.good,
+            duration: const Duration(seconds: 2),
+          ));
+        }
       }
     } catch (e) {
       debugPrint('Error launching KML on LG tap: $e');
@@ -473,6 +801,8 @@ class _ExploreScreenState extends State<ExploreScreen> {
                             ),
                           ],
                         ),
+                        const SizedBox(height: 12),
+                        _buildNarrationSection(colors, _selected!),
                       ],
                     ),
                   ),
@@ -518,7 +848,16 @@ class _ExploreScreenState extends State<ExploreScreen> {
                           lgService: DI.lgService,
                           region: _selected!,
                           initialYear: _selectedYear,
-                          onYearChanged: (y) => setState(() => _selectedYear = y),
+                          onYearChanged: (y) {
+                            setState(() => _selectedYear = y);
+                          },
+                          onYearChangeEnd: (y) {
+                            if (_isNarrating && _narrationText != null && _narrationText!.isNotEmpty) {
+                              final ratio = ((y - 1850) / 300.0).clamp(0.0, 1.0);
+                              final targetOffset = (ratio * _narrationText!.length).round().clamp(0, _narrationText!.length - 1);
+                              DI.narratorService.speak(_narrationText!, style: VoiceStyle.natural, startFromOffset: targetOffset);
+                            }
+                          },
                         )
                       else
                         Text(

@@ -25,6 +25,20 @@ class NarratorService {
   int _speakStartTimeMs = 0;
   int _estimatedDurationMs = 0;
 
+  int _currentOffset = 0;
+  int _pausedOffset = 0;
+  int _baseOffset = 0;
+  String? _lastSpokenText;
+
+  int get pausedOffset => _pausedOffset;
+  String? get lastSpokenText => _lastSpokenText;
+
+  void resetPauseState() {
+    _pausedOffset = 0;
+    _currentOffset = 0;
+    _baseOffset = 0;
+  }
+
   /// A stream of 0.0–1.0 values representing TTS playback progress.
   Stream<double> get progressStream => _progressCtrl.stream;
 
@@ -46,6 +60,9 @@ class NarratorService {
     _tts.setCompletionHandler(() {
       _stopProgressTimer();
       _progressCtrl.add(1.0);
+      _pausedOffset = 0;
+      _currentOffset = 0;
+      _baseOffset = 0;
       _speakCompleter?.complete();
       _speakCompleter = null;
     });
@@ -64,8 +81,10 @@ class NarratorService {
 
     _tts.setProgressHandler(
         (String text, int startOffset, int endOffset, String word) {
-      if (_totalTextLength > 0 && endOffset > 0) {
-        final progress = (endOffset / _totalTextLength).clamp(0.0, 0.99);
+      _currentOffset = _baseOffset + startOffset;
+      if (_totalTextLength > 0 && (startOffset + endOffset) > 0) {
+        final totalEnd = _baseOffset + endOffset;
+        final progress = (totalEnd / _totalTextLength).clamp(0.0, 0.99);
         _progressCtrl.add(progress);
       }
     });
@@ -129,17 +148,32 @@ class NarratorService {
     }
   }
 
-  /// Speak the given text using flutter_tts.
-  /// Returns a Future that completes when speaking finishes.
-  Future<void> speak(String text, {VoiceStyle style = VoiceStyle.natural}) async {
+  Future<void> speak(
+    String text, {
+    VoiceStyle style = VoiceStyle.natural,
+    int startFromOffset = 0,
+  }) async {
     await _ensureTtsInit(style: style);
     _stopProgressTimer();
 
+    _lastSpokenText = text;
+    if (startFromOffset > 0 && startFromOffset < text.length) {
+      _baseOffset = startFromOffset;
+    } else {
+      _baseOffset = 0;
+    }
+
+    final textToSpeak = _baseOffset > 0 ? text.substring(_baseOffset) : text;
     _totalTextLength = text.length;
-    _progressCtrl.add(0.0);
+    _currentOffset = _baseOffset;
+    _pausedOffset = 0;
+
+    final initialProgress = _totalTextLength > 0 ? (_baseOffset / _totalTextLength) : 0.0;
+    final remainingRatio = _totalTextLength > 0 ? ((_totalTextLength - _baseOffset) / _totalTextLength) : 1.0;
+    _progressCtrl.add(initialProgress);
 
     // Calculate estimated speaking duration to drive progress smooth fallback
-    final wordCount = text.trim().split(RegExp(r'\s+')).length;
+    final wordCount = textToSpeak.trim().split(RegExp(r'\s+')).length;
     final wordsPerSec = switch (style) {
       VoiceStyle.poetic     => 1.85,
       VoiceStyle.natural    => 2.3,
@@ -152,19 +186,20 @@ class NarratorService {
 
     _progressTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
       final elapsed = DateTime.now().millisecondsSinceEpoch - _speakStartTimeMs;
-      final p = (elapsed / _estimatedDurationMs).clamp(0.0, 0.99);
+      final p = (initialProgress + (elapsed / _estimatedDurationMs * remainingRatio)).clamp(0.0, 0.99);
       _progressCtrl.add(p);
     });
 
     _speakCompleter = Completer<void>();
-    await _tts.speak(text);
+    await _tts.speak(textToSpeak);
 
     return _speakCompleter!.future;
   }
 
-  /// Stop speaking.
+  /// Stop speaking, recording current character offset so narration can resume from where it stopped.
   Future<void> stop() async {
     _stopProgressTimer();
+    _pausedOffset = _currentOffset;
     await _tts.stop();
     _totalTextLength = 0;
     if (_speakCompleter != null && !_speakCompleter!.isCompleted) {
@@ -175,7 +210,8 @@ class NarratorService {
 
   /// Pause speaking.
   Future<void> pause() async {
-    await _tts.pause();
+    _pausedOffset = _currentOffset;
+    await _tts.stop();
   }
 
   /// Resume speaking (Android only — iOS does not support resume).
@@ -209,9 +245,9 @@ class NarratorService {
           {'parts': [{'text': prompt}]}
         ],
         'generationConfig': {
-          'temperature':     0.8,
+          'temperature':     0.95,
           'maxOutputTokens': 2000,
-          'topP':            0.9,
+          'topP':            0.95,
         },
       }),
     ).timeout(const Duration(seconds: 60));
@@ -249,6 +285,8 @@ class NarratorService {
     required String seedText,
     ClimateStats? stats,
   }) {
+    final variationSeed = DateTime.now().microsecondsSinceEpoch;
+
     final styleGuide = switch (style) {
       VoiceStyle.natural    => '''Warm, conversational, and deeply engaging — like a knowledgeable friend who has
 travelled to this region and witnessed its changes first-hand. Use vivid sensory
@@ -291,6 +329,10 @@ Category: ${region.category}
 Background research: $seedText
 
 Live climate data: $statsText
+
+═══ UNIQUE VARIATION ═══
+Seed: $variationSeed
+Ensure this narration is completely unique, with a fresh opening perspective, distinct vocabulary, and evocative imagery different from any previous narration for this region.
 
 ═══ VOICE & STYLE ═══
 $styleGuide

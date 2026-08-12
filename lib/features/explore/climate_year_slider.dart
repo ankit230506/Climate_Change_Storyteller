@@ -14,8 +14,9 @@ class ClimateYearSlider extends StatefulWidget {
     this.initialYear = 2026,
     this.minYear = 1850,
     this.maxYear = 2150,
-    this.debounceMs = 50,
+    this.debounceMs = 80,
     this.onYearChanged,
+    this.onYearChangeEnd,
   });
 
   final LgService lgService;
@@ -25,13 +26,15 @@ class ClimateYearSlider extends StatefulWidget {
   final int maxYear;
 
   /// How long to wait after the last drag tick before pushing a full KML
-  /// rebuild to the rig. 80-150ms is a good range: low enough to feel
-  /// live, high enough that a fast drag doesn't spam SSH with uploads.
+  /// rebuild to the rig. 80ms updates KML ~12 times per second during dragging,
+  /// keeping the master KML document timestamp synced with the slider.
   final int debounceMs;
 
-  /// Optional callback if the parent screen wants to react to the year
-  /// too (e.g. update a chart alongside the map).
+  /// Optional callback when the year changes during dragging.
   final ValueChanged<int>? onYearChanged;
+
+  /// Optional callback when the slider drag ends.
+  final ValueChanged<int>? onYearChangeEnd;
 
   @override
   State<ClimateYearSlider> createState() => _ClimateYearSliderState();
@@ -39,7 +42,6 @@ class ClimateYearSlider extends StatefulWidget {
 
 class _ClimateYearSliderState extends State<ClimateYearSlider> {
   late double _year;
-  Timer? _debounceTimer;
 
   // Guards against out-of-order network writes: if the KML for year 1950
   // is still uploading when the user has already dragged to 2040, we
@@ -59,42 +61,62 @@ class _ClimateYearSliderState extends State<ClimateYearSlider> {
   }
 
   @override
-  void dispose() {
-    _debounceTimer?.cancel();
-    super.dispose();
+  void didUpdateWidget(ClimateYearSlider oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialYear != widget.initialYear ||
+        oldWidget.region.id != widget.region.id) {
+      _year = widget.initialYear.toDouble().clamp(
+            widget.minYear.toDouble(),
+            widget.maxYear.toDouble(),
+          );
+      _lastTimeQueryYear = null;
+    }
   }
 
   // ─────────────────────────────────────────────
   // Drag handlers
   // ─────────────────────────────────────────────
 
+  int? _lastTimeQueryYear;
+  Timer? _dragKmlTimer;
+
+  @override
+  void dispose() {
+    _dragKmlTimer?.cancel();
+    super.dispose();
+  }
+
   void _onDrag(double value) {
     setState(() => _year = value);
     final year = value.round();
 
-    widget.lgService.sendTimeQuery(
-      year,
-      latitude: widget.region.latitude,
-      longitude: widget.region.longitude,
-      altitude: widget.region.altitude,
-    );
+    if (_lastTimeQueryYear != year) {
+      _lastTimeQueryYear = year;
+      widget.onYearChanged?.call(year);
 
-    widget.onYearChanged?.call(year);
-    _scheduleKmlUpdate(year);
+      // Instantly trigger Google Earth time clock update via /tmp/query.txt
+      widget.lgService.sendTimeQuery(
+        year,
+        latitude: widget.region.latitude,
+        longitude: widget.region.longitude,
+        altitude: widget.region.altitude,
+      );
+
+      // Stream KML payload updates with minimum 40ms latency while sliding
+      _dragKmlTimer?.cancel();
+      _dragKmlTimer = Timer(const Duration(milliseconds: 40), () {
+        if (mounted && _year.round() == year) {
+          _pushKmlForYear(year, immediate: false);
+        }
+      });
+    }
   }
 
   void _onDragEnd(double value) {
+    _dragKmlTimer?.cancel();
     final year = value.round();
-    _debounceTimer?.cancel();
     _pushKmlForYear(year, immediate: true);
-  }
-
-  void _scheduleKmlUpdate(int year) {
-    _debounceTimer?.cancel();
-    _debounceTimer = Timer(
-      Duration(milliseconds: widget.debounceMs),
-      () => _pushKmlForYear(year, immediate: false),
-    );
+    widget.onYearChangeEnd?.call(year);
   }
 
   // ─────────────────────────────────────────────
@@ -118,7 +140,7 @@ class _ClimateYearSliderState extends State<ClimateYearSlider> {
       final content = await File(path).readAsString();
       if (seq != _requestSeq) return;
 
-      final filename = '${widget.region.id}_year_$year.kml';
+      final filename = '${widget.region.id}_year_${year}_${widget.region.category}.kml';
 
       if (immediate) {
         // Bypass the debounce timer entirely — used on release, so the
@@ -129,6 +151,17 @@ class _ClimateYearSliderState extends State<ClimateYearSlider> {
           filename,
           kmlContent: content,
           duration: Duration.zero, // already debounced by our own Timer
+        );
+      }
+
+      // Re-trigger time query immediately after SFTP upload completes to force
+      // Google Earth on LG to instantly refresh the displayed KML layer.
+      if (seq == _requestSeq) {
+        await widget.lgService.sendTimeQuery(
+          year,
+          latitude: widget.region.latitude,
+          longitude: widget.region.longitude,
+          altitude: widget.region.altitude,
         );
       }
     } catch (e) {

@@ -243,6 +243,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 onChanged: (era) {
                   setState(() => _era = era);
                   _loadStats();
+                  if (DI.lgService.state.isConnected) {
+                    _sendKmlToLG();
+                  }
                 },
               ),
               const SizedBox(height: 20),
@@ -463,8 +466,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   String _eraSource(ClimateEra era) => switch (era) {
     ClimateEra.preindustrial1900 => 'Pre-industrial baseline · IPCC AR6',
+    ClimateEra.midCentury1950    => 'Mid 20th Century · IPCC AR6 Historical',
+    ClimateEra.lateCentury1980   => 'Late 20th Century · NASA / IPCC Historical',
     ClimateEra.present2026       => 'NASA GIBS · NOAA · Currently active',
-    ClimateEra.projected2100     => 'IPCC AR6 SSP3-7.0 projection',
+    ClimateEra.midProjection2060 => 'IPCC AR6 SSP3-7.0 Mid-Century projection',
+    ClimateEra.projected2100     => 'IPCC AR6 SSP3-7.0 Late-Century projection',
   };
 }
 
@@ -490,9 +496,13 @@ class _EraSlider extends StatelessWidget {
           ),
         )).toList(),
       ),
-      const SizedBox(height: 8),
-      Slider(min: 0, max: 2, divisions: 2, value: index,
-          onChanged: (v) => onChanged(ClimateEra.values[v.round()])),
+      Slider(
+        min: 0,
+        max: (ClimateEra.values.length - 1).toDouble(),
+        divisions: ClimateEra.values.length - 1,
+        value: index,
+        onChanged: (v) => onChanged(ClimateEra.values[v.round()]),
+      ),
       Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: ClimateEra.values.map((e) => Text(
@@ -590,13 +600,19 @@ class _EraCard extends StatelessWidget {
 
   IconData _icon(ClimateEra e) => switch (e) {
     ClimateEra.preindustrial1900 => Icons.ac_unit,
+    ClimateEra.midCentury1950    => Icons.factory_outlined,
+    ClimateEra.lateCentury1980   => Icons.trending_up,
     ClimateEra.present2026       => Icons.satellite_alt_outlined,
+    ClimateEra.midProjection2060 => Icons.warning_amber_rounded,
     ClimateEra.projected2100     => Icons.show_chart,
   };
 
   String _desc(ClimateEra e) => switch (e) {
     ClimateEra.preindustrial1900 => 'Pre-industrial · Full ice extent',
+    ClimateEra.midCentury1950    => 'Mid 20th Century · Post-war expansion',
+    ClimateEra.lateCentury1980   => 'Late 20th Century · Accelerating emissions',
     ClimateEra.present2026       => 'Now · NASA GIBS satellite data',
+    ClimateEra.midProjection2060 => 'Mid 21st Century · IPCC scenario',
     ClimateEra.projected2100     => 'Projection · IPCC SSP3 scenario',
   };
 }

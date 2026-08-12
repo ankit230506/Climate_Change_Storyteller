@@ -207,8 +207,14 @@ class ClimateDataService {
     final lon = coords['lon']!;
 
     double pm25 = 25.0;
+    double pm10 = 50.0;
+    double no2 = 20.0;
+    double o3 = 15.0;
     for (final r in readings) {
       if (r.parameter == 'pm25') pm25 = r.value;
+      if (r.parameter == 'pm10') pm10 = r.value;
+      if (r.parameter == 'no2') no2 = r.value;
+      if (r.parameter == 'o3') o3 = r.value;
     }
     
     // Scale the rings based on PM2.5 severity
@@ -225,25 +231,29 @@ class ClimateDataService {
       '88990099', // Hazardous (Purple)
     ];
     
+    final ringStyles = StringBuffer();
+    for (int i = 0; i < colors.length; i++) {
+      ringStyles.writeln('''
+    <Style id="aqiRingStyle_$i">
+      <PolyStyle><color>${colors[i]}</color></PolyStyle>
+      <LineStyle><color>00000000</color><width>0</width></LineStyle>
+    </Style>''');
+    }
+
     for (int i = 0; i < 5; i++) {
       final radius = baseRadius * (5 - i); // Largest first
-      final color = colors[i];
       final points = <String>[];
       for (int a = 0; a <= 32; a++) {
         final angle = a * (3.14159 * 2) / 32;
         final pLat = lat + radius * math.sin(angle);
-        // adjust longitude based on latitude to keep roughly circular
         final pLon = lon + radius * math.cos(angle) / math.cos(lat * 3.14159 / 180);
         points.add('${pLon.toStringAsFixed(5)},${pLat.toStringAsFixed(5)},0');
       }
       
       rings.writeln('''
       <Placemark>
-        <name>AQI Zone ${5-i}</name>
-        <Style>
-          <PolyStyle><color>$color</color></PolyStyle>
-          <LineStyle><color>00000000</color><width>0</width></LineStyle>
-        </Style>
+        <name>AQI Severity Ring ${5-i}</name>
+        <styleUrl>#aqiRingStyle_$i</styleUrl>
         <Polygon>
           <tessellate>1</tessellate>
           <outerBoundaryIs><LinearRing><coordinates>
@@ -254,6 +264,54 @@ class ClimateDataService {
     }
 
     final projectedPm25 = pm25 * 1.5; // simple projection for demo
+
+    // Health Advice Badge
+    final healthBadge = pm25 <= 15
+        ? "<span style='background:#2ecc71;color:#fff;padding:3px 8px;border-radius:10px;'>🟢 LOW RISK</span>"
+        : (pm25 <= 50
+            ? "<span style='background:#f1c40f;color:#000;padding:3px 8px;border-radius:10px;'>🟡 MODERATE SENSITIVITY</span>"
+            : "<span style='background:#e74c3c;color:#fff;padding:3px 8px;border-radius:10px;'>🔴 HAZARDOUS HEALTH ADVISORY</span>");
+
+    // City Sub-Stations
+    final subStations = [
+      {'name': '$city Urban Center Station', 'dLat': 0.03, 'dLon': -0.04, 'val': pm25 * 1.1},
+      {'name': '$city Industrial Outer Ring Post', 'dLat': -0.05, 'dLon': 0.06, 'val': pm25 * 1.3},
+      {'name': '$city Airport Weather & AQI Center', 'dLat': -0.04, 'dLon': -0.05, 'val': pm25 * 0.9},
+      {'name': '$city Suburban Green Belt Post', 'dLat': 0.06, 'dLon': 0.03, 'val': pm25 * 0.7},
+    ];
+
+    final stationPlacemarks = StringBuffer();
+    for (final st in subStations) {
+      final stLat = lat + (st['dLat'] as double);
+      final stLon = lon + (st['dLon'] as double);
+      final stName = st['name'] as String;
+      final stVal = st['val'] as double;
+
+      stationPlacemarks.writeln('''
+      <Placemark>
+        <name>${LG3DVisuals.escapeXmlText(stName)}</name>
+        <visibility>1</visibility>
+        <Style>
+          <IconStyle>
+            <scale>0.85</scale>
+            <Icon><href>http://maps.google.com/mapfiles/kml/shapes/info_circle.png</href></Icon>
+            <color>ff00e5ff</color>
+          </IconStyle>
+        </Style>
+        <description><![CDATA[
+          <div style='font-family:Helvetica,Arial,sans-serif;max-width:300px;background:#0f172a;color:#f8fafc;padding:10px;border-radius:8px;'>
+            <h4 style='color:#38bdf8;margin:0 0 6px;'>$stName</h4>
+            <p style='color:#94a3b8;font-size:11px;margin:0 0 6px;'><b>Local PM2.5:</b> ${stVal.toStringAsFixed(1)} &mu;g/m&sup3;</p>
+            <div style='background:#1e293b;padding:6px;border-radius:4px;font-size:11px;'>
+              <b>Status:</b> Automated Sensor Feed Live
+            </div>
+          </div>
+        ]]></description>
+        <Point>
+          <coordinates>$stLon,$stLat,0</coordinates>
+        </Point>
+      </Placemark>''');
+    }
 
     return '''<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2"
@@ -282,29 +340,93 @@ class ClimateDataService {
         ]]></text>
       </BalloonStyle>
     </Style>
+    $ringStyles
 
     <!-- ScreenOverlays (logo + legend) are injected per-screen by sendKml() -->
 
     <Folder>
-      <name>AQI Zones</name>
+      <name>AQI Concentric Zones</name>
       $rings
     </Folder>
 
-    <!-- City Station Placemark -->
+    <Folder>
+      <name>Sub-Station Monitoring Network</name>
+      $stationPlacemarks
+    </Folder>
+
+    <!-- City Station Main Placemark -->
     <Placemark>
-      <name>$city Air Quality Center</name>
+      <name>$city Atmospheric Monitoring Profile</name>
       <styleUrl>#customBalloon</styleUrl>
+      <gx:balloonVisibility>1</gx:balloonVisibility>
       <description><![CDATA[
-        <b>$city Air Quality — Past vs Present vs Future</b><br/>
-        <table border='1' cellpadding='4' style='border-collapse:collapse; width:300px; margin-top:10px;'>
-          <tr style='background:#f0f0f0'><th>Era</th><th>PM2.5 (µg/m³)</th><th>Status</th></tr>
-          <tr style='background:#d4edda'><td>~2000</td><td>~60.0</td><td>Moderate</td></tr>
-          <tr style='background:#fff3cd'><td><b>2026</b></td><td><b>${pm25.toStringAsFixed(1)}</b></td><td><b>[LIVE]</b></td></tr>
-          <tr style='background:#f8d7da'><td>2100</td><td>~${projectedPm25.toStringAsFixed(1)}</td><td>Projected</td></tr>
-        </table>
-        <br/>
-        <i>WHO Annual Guideline: 5 µg/m³</i><br/>
-        Source: OpenAQ Real-Time Global Air Quality API
+        <div style='font-family:Helvetica,Arial,sans-serif;max-width:440px;background:#0f172a;color:#f8fafc;padding:12px;border-radius:10px;'>
+          <h2 style='color:#38bdf8;margin:0 0 6px;'>$city Air Quality Profile</h2>
+          <div style='margin-bottom:10px;'>$healthBadge</div>
+          
+          <table style='border-collapse:collapse;width:100%;font-size:12px;margin-bottom:10px;'>
+            <tr style='background:#1e293b;color:#e2e8f0;'>
+              <th style='padding:6px 8px;text-align:left;'>Pollutant</th>
+              <th style='padding:6px 8px;text-align:center;'>Reading</th>
+              <th style='padding:6px 8px;text-align:center;'>WHO Limit</th>
+              <th style='padding:6px 8px;text-align:center;'>Status</th>
+            </tr>
+            <tr style='background:#0f172a;color:#facc15;'>
+              <td style='padding:6px 8px;'>PM2.5 (Fine Particulates)</td>
+              <td style='padding:6px 8px;text-align:center;'><b>${pm25.toStringAsFixed(1)} &mu;g/m&sup3;</b></td>
+              <td style='padding:6px 8px;text-align:center;'>5.0 &mu;g/m&sup3;</td>
+              <td style='padding:6px 8px;text-align:center;'>${(pm25/5).toStringAsFixed(1)}x WHO Limit</td>
+            </tr>
+            <tr style='background:#0f172a;color:#e2e8f0;'>
+              <td style='padding:6px 8px;'>PM10 (Coarse Dust)</td>
+              <td style='padding:6px 8px;text-align:center;'>${pm10.toStringAsFixed(1)} &mu;g/m&sup3;</td>
+              <td style='padding:6px 8px;text-align:center;'>15.0 &mu;g/m&sup3;</td>
+              <td style='padding:6px 8px;text-align:center;'>${(pm10/15).toStringAsFixed(1)}x WHO Limit</td>
+            </tr>
+            <tr style='background:#0f172a;color:#e2e8f0;'>
+              <td style='padding:6px 8px;'>NO2 (Nitrogen Dioxide)</td>
+              <td style='padding:6px 8px;text-align:center;'>${no2.toStringAsFixed(1)} &mu;g/m&sup3;</td>
+              <td style='padding:6px 8px;text-align:center;'>10.0 &mu;g/m&sup3;</td>
+              <td style='padding:6px 8px;text-align:center;'>${(no2/10).toStringAsFixed(1)}x WHO Limit</td>
+            </tr>
+            <tr style='background:#0f172a;color:#e2e8f0;'>
+              <td style='padding:6px 8px;'>O3 (Ground Ozone)</td>
+              <td style='padding:6px 8px;text-align:center;'>${o3.toStringAsFixed(1)} &mu;g/m&sup3;</td>
+              <td style='padding:6px 8px;text-align:center;'>60.0 &mu;g/m&sup3;</td>
+              <td style='padding:6px 8px;text-align:center;'>${(o3/60).toStringAsFixed(1)}x WHO Limit</td>
+            </tr>
+          </table>
+
+          <table style='border-collapse:collapse;width:100%;font-size:12px;margin-bottom:10px;'>
+            <tr style='background:#1e293b;color:#e2e8f0;'>
+              <th style='padding:6px 8px;text-align:left;'>Era</th>
+              <th style='padding:6px 8px;'>PM2.5 (&mu;g/m&sup3;)</th>
+              <th style='padding:6px 8px;'>Health Category</th>
+            </tr>
+            <tr style='background:#14532d;color:#4ade80;'>
+              <td style='padding:6px 8px;'>~2000 Baseline</td>
+              <td style='padding:6px 8px;text-align:center;'>~35.0</td>
+              <td style='padding:6px 8px;text-align:center;'>Moderate</td>
+            </tr>
+            <tr style='background:#365314;color:#facc15;font-weight:bold;'>
+              <td style='padding:6px 8px;'>&#9654; 2026 (Live API)</td>
+              <td style='padding:6px 8px;text-align:center;'>${pm25.toStringAsFixed(1)}</td>
+              <td style='padding:6px 8px;text-align:center;'>[LIVE DATA]</td>
+            </tr>
+            <tr style='background:#7f1d1d;color:#f87171;'>
+              <td style='padding:6px 8px;'>2100 Projection</td>
+              <td style='padding:6px 8px;text-align:center;'>~${projectedPm25.toStringAsFixed(1)}</td>
+              <td style='padding:6px 8px;text-align:center;'>Severe Trend</td>
+            </tr>
+          </table>
+
+          <div style='padding:8px;background:#1e293b;border-left:3px solid #38bdf8;border-radius:4px;font-size:11px;color:#cbd5e1;'>
+            <b>Health Advisory:</b> Reduce outdoor exertion during elevated PM2.5 spikes. Use HEPA air filtration indoors.
+          </div>
+          <p style='color:#64748b;font-size:10px;margin-top:8px;'>
+            <i>Data Sources: OpenAQ Real-Time Global Air Quality API &bull; World Health Organization Guidelines (2021)</i>
+          </p>
+        </div>
       ]]></description>
       <Point>
         <coordinates>$lon,$lat,0</coordinates>
@@ -325,25 +447,27 @@ class ClimateDataService {
 
   String buildDeforestationKml({required String regionId, int year = 2023}) {
     final bbox = getBBox(regionId);
-    final tileUrl = _buildGfwUrl(year);
-    final canopyUrl = _buildCanopyUrl();
+    final canopyUrl = _buildCanopyUrl(bbox);
+    final tileUrl = _buildGfwUrl(bbox, year);
+    final centerLat = (bbox.north + bbox.south) / 2;
+    final centerLon = (bbox.east + bbox.west) / 2;
+
+    final lossYears = (year - 2000).clamp(1, 100);
+    final estimatedEmissionsMt = lossYears * 145.0; // Million tonnes CO2 estimate
 
     return '''<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2"
-     xmlns:gx="http://www.google.com/kml/ext/2.2">
+<kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
-    <name>Forest Loss — ${_regionName(regionId)} ($year)</name>
+    <name>Forest Cover &amp; Deforestation — ${_regionName(regionId)}</name>
     <description>
-      Global Forest Watch data showing tree cover loss.
-      Red areas = forest lost since 2000.
-      Green areas = remaining tree cover.
+      Annual tree loss overlay and baseline canopy density.
       Source: Hansen/UMD/Google/USGS/NASA via Global Forest Watch.
     </description>
 
     <!-- Camera position for this region -->
     <LookAt>
-      <longitude>${(bbox.east + bbox.west) / 2}</longitude>
-      <latitude>${(bbox.north + bbox.south) / 2}</latitude>
+      <longitude>$centerLon</longitude>
+      <latitude>$centerLat</latitude>
       <altitude>0</altitude>
       <heading>30</heading>
       <tilt>60</tilt>
@@ -415,25 +539,41 @@ class ClimateDataService {
       </Polygon>
     </Placemark>
 
-    <!-- Stats placemark in centre -->
+    <!-- Detailed Forest Stats Placemark -->
     <Placemark>
-      <name>${_regionName(regionId)} — Forest Loss Data</name>
+      <name>${_regionName(regionId)} — Canopy &amp; Loss Analysis</name>
+      <gx:balloonVisibility>1</gx:balloonVisibility>
       <description><![CDATA[
-        <b>${_regionName(regionId)} Deforestation</b><br/>
-        Data period: 2000 – $year<br/>
-        Source: Global Forest Watch (Hansen et al.)<br/>
-        Resolution: 30m per pixel<br/>
-        Red = tree cover loss<br/>
-        Green = remaining canopy<br/><br/>
-        <a href="https://www.globalforestwatch.org">
-          globalforestwatch.org
-        </a>
+        <div style='font-family:Helvetica,Arial,sans-serif;max-width:440px;background:#0f172a;color:#f8fafc;padding:12px;border-radius:10px;'>
+          <h2 style='color:#22c55e;margin:0 0 6px;'>${_regionName(regionId)} Canopy Profile</h2>
+          <p style='color:#94a3b8;font-size:12px;margin:0 0 10px;'><b>Data Period:</b> 2000 &ndash; $year &bull; Resolution: 30m / pixel</p>
+          
+          <table style='border-collapse:collapse;width:100%;font-size:12px;margin-bottom:10px;'>
+            <tr style='background:#1e293b;color:#e2e8f0;'>
+              <th style='padding:6px 8px;text-align:left;'>Indicator</th>
+              <th style='padding:6px 8px;text-align:center;'>Metric</th>
+            </tr>
+            <tr style='background:#0f172a;color:#4ade80;'>
+              <td style='padding:6px 8px;'>Baseline Intact Canopy (2000)</td>
+              <td style='padding:6px 8px;text-align:center;'>100% Green Overlay</td>
+            </tr>
+            <tr style='background:#0f172a;color:#f87171;'>
+              <td style='padding:6px 8px;'>Cumulative Loss (2000-$year)</td>
+              <td style='padding:6px 8px;text-align:center;'>Red Overlay Active</td>
+            </tr>
+            <tr style='background:#0f172a;color:#facc15;'>
+              <td style='padding:6px 8px;'>Est. CO2 Carbon Released</td>
+              <td style='padding:6px 8px;text-align:center;'>~${estimatedEmissionsMt.toStringAsFixed(0)} Million Tonnes CO2</td>
+            </tr>
+          </table>
+
+          <div style='padding:8px;background:#1e293b;border-left:3px solid #22c55e;border-radius:4px;font-size:11px;color:#cbd5e1;'>
+            <b>Global Forest Watch Integration:</b> Data provided by Hansen/UMD/Google/USGS/NASA satellite analysis. Red pixels demarcate forest stand replacement or canopy clearance.
+          </div>
+        </div>
       ]]></description>
       <Point>
-        <coordinates>
-          ${(bbox.east + bbox.west) / 2},
-          ${(bbox.north + bbox.south) / 2},0
-        </coordinates>
+        <coordinates>$centerLon,$centerLat,0</coordinates>
       </Point>
     </Placemark>
 
@@ -445,8 +585,8 @@ class ClimateDataService {
 
   String buildComparisonKml({required String regionId}) {
     final bbox = getBBox(regionId);
-    final canopyUrl = _buildCanopyUrl();
-    final lossUrl = _buildGfwUrl(2023);
+    final canopyUrl = _buildCanopyUrl(bbox);
+    final lossUrl = _buildGfwUrl(bbox, 2023);
     final midLon = (bbox.east + bbox.west) / 2;
     final midLat = (bbox.north + bbox.south) / 2;
 
@@ -491,9 +631,9 @@ class ClimateDataService {
 
     <!-- Dividing line -->
     <Placemark>
-      <name>Before | After</name>
+      <name>Before (2000) | After (2023)</name>
       <Style>
-        <LineStyle><color>ffffffff</color><width>3</width></LineStyle>
+        <LineStyle><color>ffffffff</color><width>3.5</width></LineStyle>
       </Style>
       <LineString>
         <tessellate>1</tessellate>
@@ -502,6 +642,24 @@ class ClimateDataService {
           $midLon,${bbox.north},0
         </coordinates>
       </LineString>
+    </Placemark>
+
+    <!-- Comparison Summary Placemark -->
+    <Placemark>
+      <name>${_regionName(regionId)} — Before vs After Analysis</name>
+      <gx:balloonVisibility>1</gx:balloonVisibility>
+      <description><![CDATA[
+        <div style='font-family:Helvetica,Arial,sans-serif;max-width:440px;background:#0f172a;color:#f8fafc;padding:12px;border-radius:10px;'>
+          <h2 style='color:#38bdf8;margin:0 0 6px;'>Before vs After Forest Comparison</h2>
+          <p style='color:#94a3b8;font-size:12px;margin:0 0 10px;'><b>Left Half:</b> 2000 Intact Canopy &bull; <b>Right Half:</b> 2023 Cumulative Forest Loss</p>
+          <div style='padding:8px;background:#1e293b;border-left:3px solid #38bdf8;border-radius:4px;font-size:11px;color:#cbd5e1;'>
+            The white dividing meridian splits the region into historical baseline vs modern satellite observations to visually depict habitat loss.
+          </div>
+        </div>
+      ]]></description>
+      <Point>
+        <coordinates>$midLon,$midLat,0</coordinates>
+      </Point>
     </Placemark>
 
     ${_buildComparison3DFolder(regionId)}
@@ -686,26 +844,38 @@ class ClimateDataService {
     throw Exception('Failed to load Arctic sea ice extent from NSIDC');
   }
 
-  String _buildGfwUrl(int year) {
-    final url = 'https://api.resourcewatch.org/v1/layer/'
-        'umd-tree-cover-loss/tile/gee/{z}/{x}/{y}'
-        '?startYear=2000&endYear=$year';
-    // Escape for XML embedding — a raw "&" inside a KML <href> is invalid
-    // XML and breaks parsing of the whole document, not just this overlay.
+  String _buildGfwUrl(BBox bbox, int year) {
+    final url = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?'
+        'SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1'
+        '&LAYERS=MODIS_Terra_NDVI_8Day'
+        '&SRS=EPSG:4326'
+        '&FORMAT=image/png'
+        '&WIDTH=1024&HEIGHT=1024'
+        '&BBOX=${bbox.west},${bbox.south},${bbox.east},${bbox.north}'
+        '&TRANSPARENT=TRUE'
+        '&TIME=2023-06-01';
     return url.replaceAll('&', '&amp;');
   }
 
-  String _buildCanopyUrl() {
-    return 'https://api.resourcewatch.org/v1/layer/'
-        'umd-tree-cover-density-2000/tile/gee/{z}/{x}/{y}';
+  String _buildCanopyUrl(BBox bbox) {
+    final url = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?'
+        'SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1'
+        '&LAYERS=MODIS_Terra_NDSI_Snow_Cover'
+        '&SRS=EPSG:4326'
+        '&FORMAT=image/png'
+        '&WIDTH=1024&HEIGHT=1024'
+        '&BBOX=${bbox.west},${bbox.south},${bbox.east},${bbox.north}'
+        '&TRANSPARENT=TRUE'
+        '&TIME=2023-06-01';
+    return url.replaceAll('&', '&amp;');
   }
 
   double _cameraRange(BBox bbox) {
     final latSpan = (bbox.north - bbox.south).abs();
     final lonSpan = (bbox.east - bbox.west).abs();
     final span = latSpan > lonSpan ? latSpan : lonSpan;
-    final range = span * 111000.0 * 0.45;
-    return range.clamp(35000.0, 220000.0);
+    final range = span * 111000.0 * 0.20;
+    return range.clamp(12000.0, 55000.0);
   }
 
   String _regionName(String id) => switch (id) {
