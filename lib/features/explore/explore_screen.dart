@@ -14,6 +14,8 @@ import 'climate_year_slider.dart';
 import 'package:climate_storyteller/features/narrator/narration_result.dart';
 import 'package:climate_storyteller/core/storage/secure_storage_service.dart';
 import 'package:climate_storyteller/features/explore/climate_era.dart';
+import 'package:climate_storyteller/features/lg_connection/lg_overlays.dart';
+import 'package:climate_storyteller/features/lg_connection/lg_rig_state.dart';
 
 class ExploreScreen extends StatefulWidget {
   const ExploreScreen({super.key});
@@ -463,15 +465,17 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   InteractiveViewer(
-                    child: Image.network(
-                      region.imageUrl,
+                    child: Image.asset(
+                      region.assetPath,
                       fit: BoxFit.contain,
-                      loadingBuilder: (_, child, loading) => loading == null
-                          ? child
-                          : const Padding(
-                              padding: EdgeInsets.all(40),
-                              child: CircularProgressIndicator(color: Colors.white),
-                            ),
+                      errorBuilder: (_, __, ___) => Image.network(
+                        region.imageUrl,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) => Image.memory(
+                          LGOverlays.createRegionBannerPng(region.id, region.name, region.category),
+                          fit: BoxFit.contain,
+                        ),
+                      ),
                     ),
                   ),
                   Container(
@@ -546,30 +550,10 @@ class _ExploreScreenState extends State<ExploreScreen> {
       if (mounted) {
         setState(() => _isLoadingKml = false);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Loaded ${region.name} KML on LG! Orbit starting in 7s...'),
+          content: Text('Loaded ${region.name} KML on LG!'),
           backgroundColor: AppColors.primary.withValues(alpha: 0.9),
-          duration: const Duration(seconds: 3),
+          duration: const Duration(seconds: 2),
         ));
-      }
-
-      // 5. Wait 7 seconds AFTER the KML is loaded before starting orbit
-      await Future.delayed(const Duration(seconds: 7));
-
-      // 6. Start 3D orbit rotation loop after 7 seconds delay (if still on this region)
-      if (mounted && _selected?.id == region.id && lg.state.isConnected) {
-        await lg.startOrbit(
-          latitude: region.latitude,
-          longitude: region.longitude,
-          altitude: region.altitude,
-          flightDelay: Duration.zero,
-        );
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Started 3D Orbit for ${region.name} on LG!'),
-            backgroundColor: AppColors.good,
-            duration: const Duration(seconds: 2),
-          ));
-        }
       }
     } catch (e) {
       debugPrint('Error launching KML on LG tap: $e');
@@ -730,15 +714,22 @@ class _ExploreScreenState extends State<ExploreScreen> {
                                 children: [
                                   ClipRRect(
                                     borderRadius: BorderRadius.circular(12),
-                                    child: Image.network(
-                                      _selected!.imageUrl,
+                                    child: Image.asset(
+                                      _selected!.assetPath,
                                       width: 110,
                                       height: 85,
                                       fit: BoxFit.cover,
-                                      errorBuilder: (_, __, ___) => Container(
-                                        width: 110, height: 85,
-                                        color: colors.bg3,
-                                        child: Icon(Icons.image_not_supported, color: colors.textMuted),
+                                      errorBuilder: (_, __, ___) => Image.network(
+                                        _selected!.imageUrl,
+                                        width: 110,
+                                        height: 85,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) => Image.memory(
+                                          LGOverlays.createRegionBannerPng(_selected!.id, _selected!.name, _selected!.category),
+                                          width: 110,
+                                          height: 85,
+                                          fit: BoxFit.cover,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -864,20 +855,63 @@ class _ExploreScreenState extends State<ExploreScreen> {
                           'Select a climate region to activate LG time slider',
                           style: AppTypography.bodySmall.copyWith(color: colors.textMuted, fontSize: 12),
                         ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 44,
-                        child: ElevatedButton.icon(
-                          onPressed: _selected != null
-                              ? () => _launchRegionOnLG(_selected!, _selectedYear)
-                              : null,
-                          icon: const Icon(Icons.public, size: 18, color: Colors.white),
-                          label: Text(
-                            _selected != null ? 'Reload ${_selected!.name} KML on LG' : 'Select a Region Pin',
-                            style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 3,
+                            child: SizedBox(
+                              height: 44,
+                              child: ElevatedButton.icon(
+                                onPressed: _selected != null
+                                    ? () => _launchRegionOnLG(_selected!, _selectedYear)
+                                    : null,
+                                icon: const Icon(Icons.public, size: 18, color: Colors.white),
+                                label: Text(
+                                  _selected != null ? 'Reload KML' : 'Select a Region Pin',
+                                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            flex: 2,
+                            child: StreamBuilder<LGRigState>(
+                              stream: DI.lgService.stateStream,
+                              initialData: DI.lgService.state,
+                              builder: (context, snapshot) {
+                                final isOrbiting = snapshot.data?.isOrbiting ?? false;
+                                final isConnected = snapshot.data?.isConnected ?? false;
+                                return SizedBox(
+                                  height: 44,
+                                  child: ElevatedButton.icon(
+                                    onPressed: _selected != null && isConnected
+                                        ? () => DI.lgService.toggleOrbit(
+                                              latitude: _selected!.latitude,
+                                              longitude: _selected!.longitude,
+                                              altitude: _selected!.altitude,
+                                            )
+                                        : null,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: isOrbiting ? AppColors.critical : AppColors.accent,
+                                      foregroundColor: Colors.white,
+                                      elevation: 0,
+                                    ),
+                                    icon: Icon(
+                                      isOrbiting ? Icons.stop_circle : Icons.rotate_right,
+                                      size: 18,
+                                      color: Colors.white,
+                                    ),
+                                    label: Text(
+                                      isOrbiting ? 'Stop Orbit' : '3D Orbit',
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),

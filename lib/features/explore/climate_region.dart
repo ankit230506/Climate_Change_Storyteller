@@ -17,6 +17,8 @@ class ClimateRegion {
   final String imageUrl;
   final String description;
 
+  String get assetPath => 'assets/images/$id.png';
+
   const ClimateRegion({
     required this.id,
     required this.name,
@@ -43,7 +45,7 @@ const List<ClimateRegion> kDefaultRegions = [
     category: 'glacier',
     latitude: 78.2232,
     longitude: 15.6267,
-    altitude: 45000,
+    altitude: 800000,
     riskLevel: 'Critical',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'arctic_1900_glacier.kml',
@@ -66,7 +68,7 @@ const List<ClimateRegion> kDefaultRegions = [
     category: 'glacier',
     latitude: 27.9881,
     longitude: 86.9250,
-    altitude: 40000,
+    altitude: 530000,
     riskLevel: 'High',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'himalaya_1900_glacier.kml',
@@ -89,7 +91,7 @@ const List<ClimateRegion> kDefaultRegions = [
     category: 'forest',
     latitude: -3.4653,
     longitude: -62.2159,
-    altitude: 50000,
+    altitude: 800000,
     riskLevel: 'Critical',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'amazon_1900_forest.kml',
@@ -112,7 +114,7 @@ const List<ClimateRegion> kDefaultRegions = [
     category: 'sealevel',
     latitude: -8.7832,
     longitude: 179.0000,
-    altitude: 50000,
+    altitude: 1050000,
     riskLevel: 'Critical',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'pacific_1900_sealevel.kml',
@@ -135,7 +137,7 @@ const List<ClimateRegion> kDefaultRegions = [
     category: 'heat',
     latitude: 23.4162,
     longitude: 25.6628,
-    altitude: 50000,
+    altitude: 900000,
     riskLevel: 'High',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'sahara_1900_heat.kml',
@@ -158,7 +160,7 @@ const List<ClimateRegion> kDefaultRegions = [
     category: 'sealevel',
     latitude: 3.2028,
     longitude: 73.2207,
-    altitude: 25000,
+    altitude: 400000,
     riskLevel: 'Critical',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'maldives_1900_sealevel.kml',
@@ -181,7 +183,7 @@ const List<ClimateRegion> kDefaultRegions = [
     category: 'aqi',
     latitude: 28.6139,
     longitude: 77.2090,
-    altitude: 12000,
+    altitude: 100000,
     riskLevel: 'Critical',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'delhi_1900_aqi.kml',

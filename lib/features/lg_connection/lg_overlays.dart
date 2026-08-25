@@ -191,6 +191,76 @@ class LGOverlays {
     return _encodePng(pixels, width, height);
   }
 
+  static final Map<String, Uint8List> _regionBannerCache = {};
+
+  /// Returns PNG bytes for a high-res offline region banner visual card.
+  static Uint8List createRegionBannerPng(String regionId, String regionName, String category) {
+    final cacheKey = '${regionId}_$category';
+    if (_regionBannerCache.containsKey(cacheKey)) {
+      return _regionBannerCache[cacheKey]!;
+    }
+
+    const width = 480;
+    const height = 240;
+    final pixels = Uint8List(width * height * 4);
+
+    final baseColor = switch (category) {
+      'glacier'  => [15, 35, 55],    // Deep cyan/ice blue
+      'forest'   => [12, 38, 24],    // Deep forest green
+      'sealevel' => [10, 32, 58],    // Ocean blue
+      'heat'     => [48, 22, 14],    // Ember amber/red
+      'aqi'      => [38, 16, 45],    // Smog purple/magenta
+      _          => [18, 24, 38],    // Dark slate
+    };
+
+    final accentColor = switch (category) {
+      'glacier'  => [56, 189, 248],  // Cyan
+      'forest'   => [74, 222, 128],  // Neon green
+      'sealevel' => [96, 165, 250],  // Soft blue
+      'heat'     => [251, 146, 60],  // Orange
+      'aqi'      => [232, 121, 249],  // Pink/magenta
+      _          => [148, 163, 184], // Slate
+    };
+
+    // Dark gradient background card
+    _fillRect(pixels, width, height, 0, 0, width, height, baseColor[0], baseColor[1], baseColor[2], 255);
+    _drawRectBorder(pixels, width, height, 0, 0, width, height, accentColor[0], accentColor[1], accentColor[2], 255, 3);
+
+    // Design layout accents
+    for (int i = 0; i < 4; i++) {
+      final x = 24 + i * 110;
+      _fillRoundedRect(pixels, width, height, x, 24, 98, 40, 6, accentColor[0], accentColor[1], accentColor[2], 40);
+    }
+
+    _drawSimpleText(pixels, width, height, "CLIMATE CHANGE STORYTELLER", 24, 20, 160, 175, 200, 255, scale: 1);
+    _drawLine(pixels, width, height, 24, 38, width - 24, 38, accentColor[0], accentColor[1], accentColor[2], 255, 2);
+
+    _drawSimpleText(pixels, width, height, regionName.toUpperCase(), 24, 52, 255, 255, 255, 255, scale: 3);
+
+    final catTitle = switch (category) {
+      'glacier'  => 'GLACIER & ICE SHEET MELT ZONE',
+      'forest'   => 'TROPICAL FOREST CANOPY LOSS',
+      'sealevel' => 'SEA LEVEL RISE & INUNDATION',
+      'heat'     => 'EXTREME HEAT ANOMALY REGION',
+      'aqi'      => 'URBAN ATMOSPHERIC AQI PROFILE',
+      _          => 'ENVIRONMENTAL MONITORING ZONE',
+    };
+    _drawSimpleText(pixels, width, height, catTitle, 24, 98, accentColor[0], accentColor[1], accentColor[2], 255, scale: 1);
+
+    _fillRect(pixels, width, height, 24, 120, width - 48, 75, 0, 0, 0, 120);
+    _drawRectBorder(pixels, width, height, 24, 120, width - 48, 75, accentColor[0], accentColor[1], accentColor[2], 120, 1);
+
+    _drawSimpleText(pixels, width, height, "DATA MODEL: IPCC AR6 / NASA GIBS SATELLITE", 36, 132, 225, 235, 245, 255, scale: 1);
+    _drawSimpleText(pixels, width, height, "STATUS: HIGH SENSITIVITY CLIMATE TIPPING POINT", 36, 150, 250, 204, 21, 255, scale: 1);
+    _drawSimpleText(pixels, width, height, "OFFLINE VERIFIED LOCAL ASSET FEED", 36, 168, 52, 211, 153, 255, scale: 1);
+
+    _drawSimpleText(pixels, width, height, "LIQUID GALAXY MULTI-DISPLAY SYSTEM", 24, 212, 140, 155, 175, 220, scale: 1);
+
+    final pngBytes = _encodePng(pixels, width, height);
+    _regionBannerCache[cacheKey] = pngBytes;
+    return pngBytes;
+  }
+
   // ─────────────────────────────────────────────
   // Drawing Primitive Helpers
   // ─────────────────────────────────────────────

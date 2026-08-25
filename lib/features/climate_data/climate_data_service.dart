@@ -272,7 +272,7 @@ class ClimateDataService {
             ? "<span style='background:#f1c40f;color:#000;padding:3px 8px;border-radius:10px;'>🟡 MODERATE SENSITIVITY</span>"
             : "<span style='background:#e74c3c;color:#fff;padding:3px 8px;border-radius:10px;'>🔴 HAZARDOUS HEALTH ADVISORY</span>");
 
-    // City Sub-Stations
+    // City Sub-Stations & 3D Sensor Beacons
     final subStations = [
       {'name': '$city Urban Center Station', 'dLat': 0.03, 'dLon': -0.04, 'val': pm25 * 1.1},
       {'name': '$city Industrial Outer Ring Post', 'dLat': -0.05, 'dLon': 0.06, 'val': pm25 * 1.3},
@@ -287,6 +287,29 @@ class ClimateDataService {
       final stName = st['name'] as String;
       final stVal = st['val'] as double;
 
+      // 3D Elevated Beacon Spire for sub-station
+      stationPlacemarks.writeln(LG3DVisuals.build3DSensorBeacon(
+        centerLat: stLat,
+        centerLon: stLon,
+        radiusDeg: 0.015,
+        heightMeters: 12000.0,
+        beaconColorAbgr: 'c000e5ff',
+        name: '$stName 3D Beacon',
+        description: 'Atmospheric Sensor Monitoring Point',
+      ));
+
+      // 3D Elevated Telemetry Corridor linking sub-station to urban core
+      stationPlacemarks.writeln(LG3DVisuals.build3DConnectingCorridor(
+        fromLat: stLat,
+        fromLon: stLon,
+        toLat: lat,
+        toLon: lon,
+        altitudeMeters: 8000.0,
+        lineColorAbgr: 'aa00e5ff',
+        lineWidth: 3.0,
+        name: 'Telemetry Link: $stName -> $city Core',
+      ));
+
       stationPlacemarks.writeln('''
       <Placemark>
         <name>${LG3DVisuals.escapeXmlText(stName)}</name>
@@ -299,19 +322,45 @@ class ClimateDataService {
           </IconStyle>
         </Style>
         <description><![CDATA[
-          <div style='font-family:Helvetica,Arial,sans-serif;max-width:300px;background:#0f172a;color:#f8fafc;padding:10px;border-radius:8px;'>
-            <h4 style='color:#38bdf8;margin:0 0 6px;'>$stName</h4>
-            <p style='color:#94a3b8;font-size:11px;margin:0 0 6px;'><b>Local PM2.5:</b> ${stVal.toStringAsFixed(1)} &mu;g/m&sup3;</p>
-            <div style='background:#1e293b;padding:6px;border-radius:4px;font-size:11px;'>
-              <b>Status:</b> Automated Sensor Feed Live
+          <div style='font-family:Helvetica,Arial,sans-serif;max-width:380px;background:#0f172a;color:#f8fafc;padding:16px 20px;border-radius:10px;border:1px solid #334155;'>
+            <h4 style='color:#38bdf8;margin:0 0 8px;font-size:18px;font-weight:700;'>$stName</h4>
+            <p style='color:#94a3b8;font-size:15px;margin:0 0 10px;'><b>Local PM2.5:</b> <span style='color:#facc15;font-weight:bold;'>${stVal.toStringAsFixed(1)} &mu;g/m&sup3;</span></p>
+            <div style='background:#1e293b;padding:10px 12px;border-radius:6px;font-size:14px;color:#cbd5e1;line-height:1.5;'>
+              <b>Status:</b> Automated Sensor Feed Live &bull; Real-time Telemetry
             </div>
           </div>
         ]]></description>
         <Point>
-          <coordinates>$stLon,$stLat,0</coordinates>
+          <coordinates>$stLon,$stLat,12000</coordinates>
         </Point>
       </Placemark>''');
     }
+
+    // 3D City Center Smog Pillar
+    final aqiPillarHeight = (pm25 * 300.0).clamp(12000.0, 48000.0);
+    final aqiColor = pm25 <= 15
+        ? 'aa33cc44'
+        : (pm25 <= 50 ? 'aafacc15' : (pm25 <= 100 ? 'ccf97316' : 'ee990099'));
+    final cityPillar3D = LG3DVisuals.build3DAqiSmogPillar(
+      centerLat: lat,
+      centerLon: lon,
+      radiusDeg: 0.04,
+      heightMeters: aqiPillarHeight,
+      pm25: pm25,
+      severityColorAbgr: aqiColor,
+      name: '$city 3D Smog Pillar',
+      description: 'Atmospheric PM2.5 / PM10 Density Column',
+    );
+
+    final cityImageUrl = switch (city.toLowerCase()) {
+      'delhi' => 'https://images.unsplash.com/photo-1587474260584-136574528ed5?w=600&q=80',
+      'beijing' => 'https://images.unsplash.com/photo-1508804185872-d7badad00f7d?w=600&q=80',
+      'london' => 'https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?w=600&q=80',
+      'new york' => 'https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?w=600&q=80',
+      'jakarta' => 'https://images.unsplash.com/photo-1555899434-94d1368aa7af?w=600&q=80',
+      'amazon' => 'https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?w=600&q=80',
+      _ => 'https://images.unsplash.com/photo-1587474260584-136574528ed5?w=600&q=80',
+    };
 
     return '''<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2"
@@ -324,17 +373,18 @@ class ClimateDataService {
       <longitude>$lon</longitude>
       <latitude>$lat</latitude>
       <altitude>0</altitude>
-      <heading>30</heading>
-      <tilt>60</tilt>
-      <range>35000</range>
+      <heading>15</heading>
+      <tilt>35</tilt>
+      <range>95000</range>
       <altitudeMode>relativeToGround</altitudeMode>
     </LookAt>
     
     <Style id="customBalloon">
       <BalloonStyle>
+        <bgColor>ff0f172a</bgColor>
+        <textColor>fff8fafc</textColor>
         <text><![CDATA[
-          <font face="Helvetica, Arial, sans-serif">
-            <h3>\$[name]</h3>
+          <font face="Helvetica, Arial, sans-serif" color="#f8fafc">
             \$[description]
           </font>
         ]]></text>
@@ -350,6 +400,11 @@ class ClimateDataService {
     </Folder>
 
     <Folder>
+      <name>AQI 3D Column Visualization</name>
+      $cityPillar3D
+    </Folder>
+
+    <Folder>
       <name>Sub-Station Monitoring Network</name>
       $stationPlacemarks
     </Folder>
@@ -360,70 +415,71 @@ class ClimateDataService {
       <styleUrl>#customBalloon</styleUrl>
       <gx:balloonVisibility>1</gx:balloonVisibility>
       <description><![CDATA[
-        <div style='font-family:Helvetica,Arial,sans-serif;max-width:440px;background:#0f172a;color:#f8fafc;padding:12px;border-radius:10px;'>
-          <h2 style='color:#38bdf8;margin:0 0 6px;'>$city Air Quality Profile</h2>
-          <div style='margin-bottom:10px;'>$healthBadge</div>
+        <div style='font-family:Helvetica,Arial,sans-serif;max-width:580px;background:#0f172a;color:#f8fafc;padding:20px 24px;border-radius:12px;border:1px solid #334155;box-shadow:0 8px 30px rgba(0,0,0,0.6);'>
+          <img src='$cityImageUrl' style='width:100%;max-height:220px;object-fit:cover;border-radius:10px;margin-bottom:14px;border:1px solid #334155;' />
+          <h2 style='color:#38bdf8;margin:0 0 8px 0;font-size:24px;font-weight:700;letter-spacing:-0.3px;'>$city Air Quality Profile</h2>
+          <div style='margin-bottom:14px;'>$healthBadge</div>
           
-          <table style='border-collapse:collapse;width:100%;font-size:12px;margin-bottom:10px;'>
+          <table style='border-collapse:collapse;width:100%;font-size:15px;margin-bottom:14px;'>
             <tr style='background:#1e293b;color:#e2e8f0;'>
-              <th style='padding:6px 8px;text-align:left;'>Pollutant</th>
-              <th style='padding:6px 8px;text-align:center;'>Reading</th>
-              <th style='padding:6px 8px;text-align:center;'>WHO Limit</th>
-              <th style='padding:6px 8px;text-align:center;'>Status</th>
+              <th style='padding:8px 10px;text-align:left;font-size:15px;'>Pollutant</th>
+              <th style='padding:8px 10px;text-align:center;font-size:15px;'>Reading</th>
+              <th style='padding:8px 10px;text-align:center;font-size:15px;'>WHO Limit</th>
+              <th style='padding:8px 10px;text-align:center;font-size:15px;'>Status</th>
             </tr>
             <tr style='background:#0f172a;color:#facc15;'>
-              <td style='padding:6px 8px;'>PM2.5 (Fine Particulates)</td>
-              <td style='padding:6px 8px;text-align:center;'><b>${pm25.toStringAsFixed(1)} &mu;g/m&sup3;</b></td>
-              <td style='padding:6px 8px;text-align:center;'>5.0 &mu;g/m&sup3;</td>
-              <td style='padding:6px 8px;text-align:center;'>${(pm25/5).toStringAsFixed(1)}x WHO Limit</td>
+              <td style='padding:8px 10px;'>PM2.5 (Fine Particulates)</td>
+              <td style='padding:8px 10px;text-align:center;'><b>${pm25.toStringAsFixed(1)} &mu;g/m&sup3;</b></td>
+              <td style='padding:8px 10px;text-align:center;'>5.0 &mu;g/m&sup3;</td>
+              <td style='padding:8px 10px;text-align:center;'>${(pm25/5).toStringAsFixed(1)}x WHO Limit</td>
             </tr>
             <tr style='background:#0f172a;color:#e2e8f0;'>
-              <td style='padding:6px 8px;'>PM10 (Coarse Dust)</td>
-              <td style='padding:6px 8px;text-align:center;'>${pm10.toStringAsFixed(1)} &mu;g/m&sup3;</td>
-              <td style='padding:6px 8px;text-align:center;'>15.0 &mu;g/m&sup3;</td>
-              <td style='padding:6px 8px;text-align:center;'>${(pm10/15).toStringAsFixed(1)}x WHO Limit</td>
+              <td style='padding:8px 10px;'>PM10 (Coarse Dust)</td>
+              <td style='padding:8px 10px;text-align:center;'>${pm10.toStringAsFixed(1)} &mu;g/m&sup3;</td>
+              <td style='padding:8px 10px;text-align:center;'>15.0 &mu;g/m&sup3;</td>
+              <td style='padding:8px 10px;text-align:center;'>${(pm10/15).toStringAsFixed(1)}x WHO Limit</td>
             </tr>
             <tr style='background:#0f172a;color:#e2e8f0;'>
-              <td style='padding:6px 8px;'>NO2 (Nitrogen Dioxide)</td>
-              <td style='padding:6px 8px;text-align:center;'>${no2.toStringAsFixed(1)} &mu;g/m&sup3;</td>
-              <td style='padding:6px 8px;text-align:center;'>10.0 &mu;g/m&sup3;</td>
-              <td style='padding:6px 8px;text-align:center;'>${(no2/10).toStringAsFixed(1)}x WHO Limit</td>
+              <td style='padding:8px 10px;'>NO2 (Nitrogen Dioxide)</td>
+              <td style='padding:8px 10px;text-align:center;'>${no2.toStringAsFixed(1)} &mu;g/m&sup3;</td>
+              <td style='padding:8px 10px;text-align:center;'>10.0 &mu;g/m&sup3;</td>
+              <td style='padding:8px 10px;text-align:center;'>${(no2/10).toStringAsFixed(1)}x WHO Limit</td>
             </tr>
             <tr style='background:#0f172a;color:#e2e8f0;'>
-              <td style='padding:6px 8px;'>O3 (Ground Ozone)</td>
-              <td style='padding:6px 8px;text-align:center;'>${o3.toStringAsFixed(1)} &mu;g/m&sup3;</td>
-              <td style='padding:6px 8px;text-align:center;'>60.0 &mu;g/m&sup3;</td>
-              <td style='padding:6px 8px;text-align:center;'>${(o3/60).toStringAsFixed(1)}x WHO Limit</td>
+              <td style='padding:8px 10px;'>O3 (Ground Ozone)</td>
+              <td style='padding:8px 10px;text-align:center;'>${o3.toStringAsFixed(1)} &mu;g/m&sup3;</td>
+              <td style='padding:8px 10px;text-align:center;'>60.0 &mu;g/m&sup3;</td>
+              <td style='padding:8px 10px;text-align:center;'>${(o3/60).toStringAsFixed(1)}x WHO Limit</td>
             </tr>
           </table>
 
-          <table style='border-collapse:collapse;width:100%;font-size:12px;margin-bottom:10px;'>
+          <table style='border-collapse:collapse;width:100%;font-size:15px;margin-bottom:14px;'>
             <tr style='background:#1e293b;color:#e2e8f0;'>
-              <th style='padding:6px 8px;text-align:left;'>Era</th>
-              <th style='padding:6px 8px;'>PM2.5 (&mu;g/m&sup3;)</th>
-              <th style='padding:6px 8px;'>Health Category</th>
+              <th style='padding:8px 10px;text-align:left;font-size:15px;'>Era</th>
+              <th style='padding:8px 10px;text-align:center;font-size:15px;'>PM2.5 (&mu;g/m&sup3;)</th>
+              <th style='padding:8px 10px;text-align:center;font-size:15px;'>Health Category</th>
             </tr>
             <tr style='background:#14532d;color:#4ade80;'>
-              <td style='padding:6px 8px;'>~2000 Baseline</td>
-              <td style='padding:6px 8px;text-align:center;'>~35.0</td>
-              <td style='padding:6px 8px;text-align:center;'>Moderate</td>
+              <td style='padding:8px 10px;'>~2000 Baseline</td>
+              <td style='padding:8px 10px;text-align:center;'>~35.0</td>
+              <td style='padding:8px 10px;text-align:center;'>Moderate</td>
             </tr>
             <tr style='background:#365314;color:#facc15;font-weight:bold;'>
-              <td style='padding:6px 8px;'>&#9654; 2026 (Live API)</td>
-              <td style='padding:6px 8px;text-align:center;'>${pm25.toStringAsFixed(1)}</td>
-              <td style='padding:6px 8px;text-align:center;'>[LIVE DATA]</td>
+              <td style='padding:8px 10px;'>&#9654; 2026 (Live API)</td>
+              <td style='padding:8px 10px;text-align:center;'>${pm25.toStringAsFixed(1)}</td>
+              <td style='padding:8px 10px;text-align:center;'>[LIVE DATA]</td>
             </tr>
             <tr style='background:#7f1d1d;color:#f87171;'>
-              <td style='padding:6px 8px;'>2100 Projection</td>
-              <td style='padding:6px 8px;text-align:center;'>~${projectedPm25.toStringAsFixed(1)}</td>
-              <td style='padding:6px 8px;text-align:center;'>Severe Trend</td>
+              <td style='padding:8px 10px;'>2100 Projection</td>
+              <td style='padding:8px 10px;text-align:center;'>~${projectedPm25.toStringAsFixed(1)}</td>
+              <td style='padding:8px 10px;text-align:center;'>Severe Trend</td>
             </tr>
           </table>
 
-          <div style='padding:8px;background:#1e293b;border-left:3px solid #38bdf8;border-radius:4px;font-size:11px;color:#cbd5e1;'>
-            <b>Health Advisory:</b> Reduce outdoor exertion during elevated PM2.5 spikes. Use HEPA air filtration indoors.
+          <div style='padding:12px 16px;background:#1e293b;border-left:5px solid #38bdf8;border-radius:6px;font-size:15px;color:#cbd5e1;line-height:1.5;'>
+            <b style='color:#38bdf8;font-size:16px;display:block;margin-bottom:4px;'>Health Advisory:</b> Reduce outdoor exertion during elevated PM2.5 spikes. Use HEPA air filtration indoors.
           </div>
-          <p style='color:#64748b;font-size:10px;margin-top:8px;'>
+          <p style='color:#64748b;font-size:12px;margin-top:10px;line-height:1.4;'>
             <i>Data Sources: OpenAQ Real-Time Global Air Quality API &bull; World Health Organization Guidelines (2021)</i>
           </p>
         </div>
@@ -455,6 +511,14 @@ class ClimateDataService {
     final lossYears = (year - 2000).clamp(1, 100);
     final estimatedEmissionsMt = lossYears * 145.0; // Million tonnes CO2 estimate
 
+    final forestImageUrl = switch (regionId.toLowerCase()) {
+      'amazon' => 'https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?w=600&q=80',
+      'congo' => 'https://images.unsplash.com/photo-1547471080-7cc2caa01a7e?w=600&q=80',
+      'borneo' => 'https://images.unsplash.com/photo-1534567153574-2b12153a87f0?w=600&q=80',
+      'himalaya' => 'https://images.unsplash.com/photo-1589182373726-e4f658ab50f0?w=600&q=80',
+      _ => 'https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?w=600&q=80',
+    };
+
     return '''<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
@@ -469,11 +533,23 @@ class ClimateDataService {
       <longitude>$centerLon</longitude>
       <latitude>$centerLat</latitude>
       <altitude>0</altitude>
-      <heading>30</heading>
-      <tilt>60</tilt>
+      <heading>15</heading>
+      <tilt>35</tilt>
       <range>${_cameraRange(bbox)}</range>
       <altitudeMode>relativeToGround</altitudeMode>
     </LookAt>
+
+    <Style id="customBalloon">
+      <BalloonStyle>
+        <bgColor>ff0f172a</bgColor>
+        <textColor>fff8fafc</textColor>
+        <text><![CDATA[
+          <font face="Helvetica, Arial, sans-serif" color="#f8fafc">
+            \$[description]
+          </font>
+        ]]></text>
+      </BalloonStyle>
+    </Style>
 
     <!-- ScreenOverlays (logo + legend) are injected per-screen by sendKml() -->
 
@@ -542,33 +618,35 @@ class ClimateDataService {
     <!-- Detailed Forest Stats Placemark -->
     <Placemark>
       <name>${_regionName(regionId)} — Canopy &amp; Loss Analysis</name>
+      <styleUrl>#customBalloon</styleUrl>
       <gx:balloonVisibility>1</gx:balloonVisibility>
       <description><![CDATA[
-        <div style='font-family:Helvetica,Arial,sans-serif;max-width:440px;background:#0f172a;color:#f8fafc;padding:12px;border-radius:10px;'>
-          <h2 style='color:#22c55e;margin:0 0 6px;'>${_regionName(regionId)} Canopy Profile</h2>
-          <p style='color:#94a3b8;font-size:12px;margin:0 0 10px;'><b>Data Period:</b> 2000 &ndash; $year &bull; Resolution: 30m / pixel</p>
+        <div style='font-family:Helvetica,Arial,sans-serif;max-width:580px;background:#0f172a;color:#f8fafc;padding:20px 24px;border-radius:12px;border:1px solid #334155;box-shadow:0 8px 30px rgba(0,0,0,0.6);'>
+          <img src='$forestImageUrl' style='width:100%;max-height:220px;object-fit:cover;border-radius:10px;margin-bottom:14px;border:1px solid #334155;' />
+          <h2 style='color:#22c55e;margin:0 0 8px 0;font-size:24px;font-weight:700;letter-spacing:-0.3px;'>${_regionName(regionId)} Canopy Profile</h2>
+          <p style='color:#94a3b8;font-size:16px;margin:0 0 14px;line-height:1.5;'><b>Data Period:</b> 2000 &ndash; $year &bull; Resolution: 30m / pixel</p>
           
-          <table style='border-collapse:collapse;width:100%;font-size:12px;margin-bottom:10px;'>
+          <table style='border-collapse:collapse;width:100%;font-size:15px;margin-bottom:14px;'>
             <tr style='background:#1e293b;color:#e2e8f0;'>
-              <th style='padding:6px 8px;text-align:left;'>Indicator</th>
-              <th style='padding:6px 8px;text-align:center;'>Metric</th>
+              <th style='padding:8px 10px;text-align:left;font-size:15px;'>Indicator</th>
+              <th style='padding:8px 10px;text-align:center;font-size:15px;'>Metric</th>
             </tr>
             <tr style='background:#0f172a;color:#4ade80;'>
-              <td style='padding:6px 8px;'>Baseline Intact Canopy (2000)</td>
-              <td style='padding:6px 8px;text-align:center;'>100% Green Overlay</td>
+              <td style='padding:8px 10px;'>Baseline Intact Canopy (2000)</td>
+              <td style='padding:8px 10px;text-align:center;'>100% Green Overlay</td>
             </tr>
             <tr style='background:#0f172a;color:#f87171;'>
-              <td style='padding:6px 8px;'>Cumulative Loss (2000-$year)</td>
-              <td style='padding:6px 8px;text-align:center;'>Red Overlay Active</td>
+              <td style='padding:8px 10px;'>Cumulative Loss (2000-$year)</td>
+              <td style='padding:8px 10px;text-align:center;'>Red Overlay Active</td>
             </tr>
             <tr style='background:#0f172a;color:#facc15;'>
-              <td style='padding:6px 8px;'>Est. CO2 Carbon Released</td>
-              <td style='padding:6px 8px;text-align:center;'>~${estimatedEmissionsMt.toStringAsFixed(0)} Million Tonnes CO2</td>
+              <td style='padding:8px 10px;'>Est. CO2 Carbon Released</td>
+              <td style='padding:8px 10px;text-align:center;'><b>~${estimatedEmissionsMt.toStringAsFixed(0)} Million Tonnes CO2</b></td>
             </tr>
           </table>
 
-          <div style='padding:8px;background:#1e293b;border-left:3px solid #22c55e;border-radius:4px;font-size:11px;color:#cbd5e1;'>
-            <b>Global Forest Watch Integration:</b> Data provided by Hansen/UMD/Google/USGS/NASA satellite analysis. Red pixels demarcate forest stand replacement or canopy clearance.
+          <div style='padding:12px 16px;background:#1e293b;border-left:5px solid #22c55e;border-radius:6px;font-size:15px;color:#cbd5e1;line-height:1.5;'>
+            <b style='color:#22c55e;font-size:16px;display:block;margin-bottom:4px;'>Global Forest Watch Integration:</b> Data provided by Hansen/UMD/Google/USGS/NASA satellite analysis. Red pixels demarcate forest stand replacement or canopy clearance.
           </div>
         </div>
       ]]></description>
@@ -590,6 +668,14 @@ class ClimateDataService {
     final midLon = (bbox.east + bbox.west) / 2;
     final midLat = (bbox.north + bbox.south) / 2;
 
+    final forestImageUrl = switch (regionId.toLowerCase()) {
+      'amazon' => 'https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?w=600&q=80',
+      'congo' => 'https://images.unsplash.com/photo-1547471080-7cc2caa01a7e?w=600&q=80',
+      'borneo' => 'https://images.unsplash.com/photo-1534567153574-2b12153a87f0?w=600&q=80',
+      'himalaya' => 'https://images.unsplash.com/photo-1589182373726-e4f658ab50f0?w=600&q=80',
+      _ => 'https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?w=600&q=80',
+    };
+
     return '''<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
@@ -599,9 +685,23 @@ class ClimateDataService {
       <longitude>$midLon</longitude>
       <latitude>$midLat</latitude>
       <altitude>0</altitude>
+      <heading>15</heading>
+      <tilt>35</tilt>
       <range>${_cameraRange(bbox)}</range>
       <altitudeMode>relativeToGround</altitudeMode>
     </LookAt>
+
+    <Style id="customBalloon">
+      <BalloonStyle>
+        <bgColor>ff0f172a</bgColor>
+        <textColor>fff8fafc</textColor>
+        <text><![CDATA[
+          <font face="Helvetica, Arial, sans-serif" color="#f8fafc">
+            \$[description]
+          </font>
+        ]]></text>
+      </BalloonStyle>
+    </Style>
 
     <!-- 2000 baseline — left half -->
     <GroundOverlay>
@@ -647,12 +747,14 @@ class ClimateDataService {
     <!-- Comparison Summary Placemark -->
     <Placemark>
       <name>${_regionName(regionId)} — Before vs After Analysis</name>
+      <styleUrl>#customBalloon</styleUrl>
       <gx:balloonVisibility>1</gx:balloonVisibility>
       <description><![CDATA[
-        <div style='font-family:Helvetica,Arial,sans-serif;max-width:440px;background:#0f172a;color:#f8fafc;padding:12px;border-radius:10px;'>
-          <h2 style='color:#38bdf8;margin:0 0 6px;'>Before vs After Forest Comparison</h2>
-          <p style='color:#94a3b8;font-size:12px;margin:0 0 10px;'><b>Left Half:</b> 2000 Intact Canopy &bull; <b>Right Half:</b> 2023 Cumulative Forest Loss</p>
-          <div style='padding:8px;background:#1e293b;border-left:3px solid #38bdf8;border-radius:4px;font-size:11px;color:#cbd5e1;'>
+        <div style='font-family:Helvetica,Arial,sans-serif;max-width:580px;background:#0f172a;color:#f8fafc;padding:20px 24px;border-radius:12px;border:1px solid #334155;box-shadow:0 8px 30px rgba(0,0,0,0.6);'>
+          <img src='$forestImageUrl' style='width:100%;max-height:220px;object-fit:cover;border-radius:10px;margin-bottom:14px;border:1px solid #334155;' />
+          <h2 style='color:#38bdf8;margin:0 0 8px 0;font-size:24px;font-weight:700;letter-spacing:-0.3px;'>Before vs After Forest Comparison</h2>
+          <p style='color:#94a3b8;font-size:16px;margin:0 0 14px;line-height:1.5;'><b>Left Half:</b> 2000 Intact Canopy &bull; <b>Right Half:</b> 2023 Cumulative Forest Loss</p>
+          <div style='padding:12px 16px;background:#1e293b;border-left:5px solid #38bdf8;border-radius:6px;font-size:15px;color:#cbd5e1;line-height:1.5;'>
             The white dividing meridian splits the region into historical baseline vs modern satellite observations to visually depict habitat loss.
           </div>
         </div>
@@ -672,58 +774,90 @@ class ClimateDataService {
     final bbox = getBBox(regionId);
     final centerLat = (bbox.north + bbox.south) / 2;
     final centerLon = (bbox.east + bbox.west) / 2;
-    final latSpan = (bbox.north - bbox.south).abs();
-    final lonSpan = (bbox.east - bbox.west).abs();
-    final maxSpan = latSpan > lonSpan ? latSpan : lonSpan;
-    final factor = ((year - 2000) * 0.035).clamp(0.12, 0.95);
+    final dLatSpan = (bbox.north - bbox.south) * 0.25;
+    final dLonSpan = (bbox.east - bbox.west) * 0.25;
 
-    return LG3DVisuals.build3DMeshAndSpikes(
-      centerLat: centerLat,
-      centerLon: centerLon,
-      spanDeg: maxSpan * 0.75,
-      category: 'forest',
-      severityFactor: factor,
-      name: '${_regionName(regionId)} Deforestation 3D Mesh & Spikes ($year)',
-    );
+    final sectors = [
+      {'name': 'Rondônia Frontier', 'dLat': -dLatSpan * 0.9, 'dLon': -dLonSpan * 0.8, 'clearYear': 2005},
+      {'name': 'Mato Grosso Edge', 'dLat': -dLatSpan * 1.1, 'dLon': dLonSpan * 0.7, 'clearYear': 2010},
+      {'name': 'Pará Timber Arc', 'dLat': dLatSpan * 0.4, 'dLon': dLonSpan * 1.1, 'clearYear': 2015},
+      {'name': 'BR-163 Highway Corridor', 'dLat': -dLatSpan * 0.5, 'dLon': dLonSpan * 0.4, 'clearYear': 2020},
+      {'name': 'Tapajós Basin Sector', 'dLat': dLatSpan * 0.6, 'dLon': dLonSpan * 0.5, 'clearYear': 2024},
+      {'name': 'Xingu River Sector', 'dLat': -dLatSpan * 0.3, 'dLon': dLonSpan * 0.9, 'clearYear': 2028},
+      {'name': 'Acre Expansion Sector', 'dLat': -dLatSpan * 0.6, 'dLon': -dLonSpan * 1.0, 'clearYear': 2032},
+      {'name': 'Central Manaus Reserve', 'dLat': dLatSpan * 0.2, 'dLon': 0.0, 'clearYear': 2050},
+    ];
+
+    final sb = StringBuffer();
+    sb.writeln('<Folder>');
+    sb.writeln('  <name>3D Forest &amp; Carbon Visualization ($year)</name>');
+    sb.writeln('  <visibility>1</visibility>');
+    sb.writeln('  <open>1</open>');
+
+    for (final s in sectors) {
+      final sLat = centerLat + (s['dLat'] as double);
+      final sLon = centerLon + (s['dLon'] as double);
+      final sName = s['name'] as String;
+      final clearYear = s['clearYear'] as int;
+
+      // Only render if still standing in this year. If cleared, it completely vanishes!
+      if (year <= clearYear) {
+        sb.writeln(LG3DVisuals.build3DHexagonalPrism(
+          centerLat: sLat,
+          centerLon: sLon,
+          radiusDeg: dLonSpan * 0.22,
+          heightMeters: 32000.0,
+          topColorAbgr: 'ee16a34a',
+          sideColorAbgr: 'cc22c55e',
+          wireColorAbgr: 'ff4ade80',
+          name: '$sName — Intact Canopy',
+          description: 'Living Forest Canopy Cell ($year)',
+        ));
+      }
+    }
+
+    sb.writeln('</Folder>');
+    return sb.toString();
   }
 
   String _buildComparison3DFolder(String regionId) {
     final bbox = getBBox(regionId);
-    final centerLat = (bbox.north + bbox.south) / 2;
-    final centerLon = (bbox.east + bbox.west) / 2;
-    final latSpan = (bbox.north - bbox.south).abs();
-    final lonSpan = (bbox.east - bbox.west).abs();
-    final maxSpan = latSpan > lonSpan ? latSpan : lonSpan;
+    final midLon = (bbox.east + bbox.west) / 2;
+    final midLat = (bbox.north + bbox.south) / 2;
 
-    final leftLon = centerLon - maxSpan / 4;
-    final leftColors = LG3DVisuals.getForestColors(1.0);
-    final leftPyramid = LG3DVisuals.build3DPyramid(
-      centerLat: centerLat,
-      centerLon: leftLon,
-      spanDeg: maxSpan * 0.4,
-      heightMeters: 450000.0,
-      face1ColorAbgr: leftColors[0],
-      face2ColorAbgr: leftColors[1],
-      face3ColorAbgr: leftColors[2],
-      face4ColorAbgr: leftColors[3],
-      name: 'Forest 2000 (3D)',
+    final leftTower = LG3DVisuals.build3DHexagonalPrism(
+      centerLat: midLat,
+      centerLon: midLon - 0.35,
+      radiusDeg: 0.24,
+      heightMeters: 45000.0,
+      topColorAbgr: 'ee16a34a',
+      sideColorAbgr: 'cc22c55e',
+      wireColorAbgr: 'ff4ade80',
+      name: '2000 Baseline Intact Hexagonal Canopy',
+      description: 'Historical Intact Rainforest Density',
     );
 
-    final rightLon = centerLon + maxSpan / 4;
-    final rightColors = LG3DVisuals.getForestColors(0.5);
-    final rightPyramid = LG3DVisuals.build3DPyramid(
-      centerLat: centerLat,
-      centerLon: rightLon,
-      spanDeg: maxSpan * 0.4,
-      heightMeters: 250000.0,
-      face1ColorAbgr: rightColors[0],
-      face2ColorAbgr: rightColors[1],
-      face3ColorAbgr: rightColors[2],
-      face4ColorAbgr: rightColors[3],
-      name: 'Forest Loss 2023 (3D)',
+    final rightTower = LG3DVisuals.build3DPyramid(
+      centerLat: midLat,
+      centerLon: midLon + 0.35,
+      spanDeg: 0.28,
+      heightMeters: 32000.0,
+      face1ColorAbgr: 'cc0022ee',
+      face2ColorAbgr: 'cc0044ff',
+      face3ColorAbgr: 'cc0011cc',
+      face4ColorAbgr: 'cc0033dd',
+      name: '2023 Cumulative Forest Loss Pyramid',
+      description: 'Modern Deforested Carbon Release Volume',
     );
 
-    return '<Folder><name>Forest Comparison (3D)</name><open>1</open>$leftPyramid$rightPyramid</Folder>';
+    return '''
+    <Folder>
+      <name>3D Comparative Forest Structures</name>
+      <visibility>1</visibility>
+      <open>1</open>
+      $leftTower
+      $rightTower
+    </Folder>''';
   }
 
   Future<void> sendToLG({required String regionId, int year = 2023}) async {
@@ -845,7 +979,7 @@ class ClimateDataService {
   }
 
   String _buildGfwUrl(BBox bbox, int year) {
-    final url = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?'
+    final url = 'http://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?'
         'SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1'
         '&LAYERS=MODIS_Terra_NDVI_8Day'
         '&SRS=EPSG:4326'
@@ -858,7 +992,7 @@ class ClimateDataService {
   }
 
   String _buildCanopyUrl(BBox bbox) {
-    final url = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?'
+    final url = 'http://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?'
         'SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1'
         '&LAYERS=MODIS_Terra_NDSI_Snow_Cover'
         '&SRS=EPSG:4326'
@@ -874,8 +1008,8 @@ class ClimateDataService {
     final latSpan = (bbox.north - bbox.south).abs();
     final lonSpan = (bbox.east - bbox.west).abs();
     final span = latSpan > lonSpan ? latSpan : lonSpan;
-    final range = span * 111000.0 * 0.20;
-    return range.clamp(12000.0, 55000.0);
+    final range = span * 111000.0 * 0.45;
+    return range.clamp(100000.0, 1200000.0);
   }
 
   String _regionName(String id) => switch (id) {

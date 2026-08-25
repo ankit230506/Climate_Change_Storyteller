@@ -73,10 +73,7 @@ class _ClimateYearSliderState extends State<ClimateYearSlider> {
     }
   }
 
-  // ─────────────────────────────────────────────
-  // Drag handlers
-  // ─────────────────────────────────────────────
-
+  //drag handlers
   int? _lastTimeQueryYear;
   Timer? _dragKmlTimer;
 
@@ -102,9 +99,9 @@ class _ClimateYearSliderState extends State<ClimateYearSlider> {
         altitude: widget.region.altitude,
       );
 
-      // Stream KML payload updates with minimum 40ms latency while sliding
+      // Stream KML payload updates debounced while sliding so SFTP does not clog connection
       _dragKmlTimer?.cancel();
-      _dragKmlTimer = Timer(const Duration(milliseconds: 40), () {
+      _dragKmlTimer = Timer(const Duration(milliseconds: 400), () {
         if (mounted && _year.round() == year) {
           _pushKmlForYear(year, immediate: false);
         }
@@ -119,9 +116,7 @@ class _ClimateYearSliderState extends State<ClimateYearSlider> {
     widget.onYearChangeEnd?.call(year);
   }
 
-  // ─────────────────────────────────────────────
-  // KML push (shared by debounced + on-release paths)
-  // ─────────────────────────────────────────────
+//kml push
 
   Future<void> _pushKmlForYear(int year, {required bool immediate}) async {
     final seq = ++_requestSeq;
@@ -173,9 +168,7 @@ class _ClimateYearSliderState extends State<ClimateYearSlider> {
     }
   }
 
-  // ─────────────────────────────────────────────
-  // UI
-  // ─────────────────────────────────────────────
+  
 
   @override
   Widget build(BuildContext context) {

@@ -43,6 +43,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   }
 
   Future<void> _sendKmlToLG() async {
+    if (_loading) return;
     final lg = DI.lgService;
     if (!lg.state.isConnected) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -244,6 +245,16 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   setState(() => _era = era);
                   _loadStats();
                   if (DI.lgService.state.isConnected) {
+                    DI.lgService.sendTimeQuery(
+                      era.year,
+                      latitude: _region.latitude,
+                      longitude: _region.longitude,
+                      altitude: _region.altitude,
+                    );
+                  }
+                },
+                onChangeEnd: (era) {
+                  if (DI.lgService.state.isConnected) {
                     _sendKmlToLG();
                   }
                 },
@@ -420,15 +431,57 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   ]),
                 ),
 
-              // ── Send KML button ──────────────────────────────────────────
-              ElevatedButton.icon(
-                onPressed: _loading ? null : _sendKmlToLG,
-                icon: _loading
-                    ? const SizedBox(width: 18, height: 18,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.send, size: 18, color: Colors.white),
-                label: Text(_loading ? 'Sending…' : 'Send KML to LG'),
+              // ── Send KML & 3D Orbit Buttons ──────────────────────────────
+              Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: ElevatedButton.icon(
+                      onPressed: _loading ? null : _sendKmlToLG,
+                      icon: _loading
+                          ? const SizedBox(width: 18, height: 18,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white))
+                          : const Icon(Icons.send, size: 18, color: Colors.white),
+                      label: Text(_loading ? 'Sending…' : 'Send KML to LG'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    flex: 2,
+                    child: StreamBuilder<LGRigState>(
+                      stream: DI.lgService.stateStream,
+                      initialData: DI.lgService.state,
+                      builder: (context, snapshot) {
+                        final isOrbiting = snapshot.data?.isOrbiting ?? false;
+                        final isConnected = snapshot.data?.isConnected ?? false;
+                        return ElevatedButton.icon(
+                          onPressed: isConnected
+                              ? () => DI.lgService.toggleOrbit(
+                                    latitude: _region.latitude,
+                                    longitude: _region.longitude,
+                                    altitude: _region.altitude,
+                                  )
+                              : null,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: isOrbiting ? AppColors.critical : AppColors.accent,
+                            foregroundColor: Colors.white,
+                            minimumSize: const Size(0, 48),
+                          ),
+                          icon: Icon(
+                            isOrbiting ? Icons.stop_circle : Icons.rotate_right,
+                            size: 18,
+                            color: Colors.white,
+                          ),
+                          label: Text(
+                            isOrbiting ? 'Stop' : '3D Orbit',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 8),
 
@@ -477,7 +530,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
 class _EraSlider extends StatelessWidget {
   final ClimateEra selected;
   final ValueChanged<ClimateEra> onChanged;
-  const _EraSlider({required this.selected, required this.onChanged});
+  final ValueChanged<ClimateEra>? onChangeEnd;
+  const _EraSlider({
+    required this.selected,
+    required this.onChanged,
+    this.onChangeEnd,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -502,6 +560,9 @@ class _EraSlider extends StatelessWidget {
         divisions: ClimateEra.values.length - 1,
         value: index,
         onChanged: (v) => onChanged(ClimateEra.values[v.round()]),
+        onChangeEnd: onChangeEnd != null
+            ? (v) => onChangeEnd!(ClimateEra.values[v.round()])
+            : null,
       ),
       Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
