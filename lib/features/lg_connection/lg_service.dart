@@ -31,7 +31,7 @@ enum ScreenRole { branding, history, reference, main, analysis, graphs, legend }
 int getLeftMostScreenNumber(int screenCount) {
   if (screenCount <= 1) return 1;
   if (screenCount == 2) return 2;
-  if (screenCount % 2 == 1) return screenCount; // 3 -> lg3, 5 -> lg5, 7 -> lg7
+  if (screenCount % 2 == 1) return screenCount;
   return screenCount - 1;
 }
 
@@ -40,7 +40,7 @@ int getLeftMostScreenNumber(int screenCount) {
 int getRightMostScreenNumber(int screenCount) {
   if (screenCount <= 1) return 1;
   if (screenCount == 2) return 1;
-  if (screenCount % 2 == 1) return screenCount - 1; // 3 -> lg2, 5 -> lg4, 7 -> lg6
+  if (screenCount % 2 == 1) return screenCount - 1;
   return screenCount;
 }
 
@@ -73,14 +73,12 @@ class LgService {
   static const _queryFile = '/tmp/query.txt';
   static const _kmlSyncFile = '/var/www/html/kmls.txt';
 
-  static const _gibsBase = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi';
+  static const _gibsBase = 'http://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi';
   static const _noaaBase = 'https://www.ncei.noaa.gov/cdo-web/api/v2';
   static const String kLgLogoUrl =
       'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEgXmdNgBTXup6bdWew5RzgCmC9pPb7rK487CpiscWB2S8OlhwFHmeeACHIIjx4B5-Iv-t95mNUx0JhB_oATG3-Tq1gs8Uj0-Xb9Njye6rHtKKsnJQJlzZqJxMDnj_2TXX3eA5x6VSgc8aw/s320-rw/LOGO+LIQUID+GALAXY-sq1000-+OKnoline.png';
-
-  // Oblique camera tilt so extruded/3D geometry is visible on screens
-  static const double _default3DTilt = 60.0;
-  static const double _default3DHeading = 30.0;
+  static const double _default3DTilt = 35.0;
+  static const double _default3DHeading = 15.0;
 
   static const Map<String, String> _gibsLayers = {
     'glacier':  'MODIS_Terra_NDSI_Snow_Cover',
@@ -89,10 +87,6 @@ class LgService {
     'heat':     'MODIS_Terra_Land_Surface_Temp_Day',
     'aqi':      'MODIS_Terra_Aerosol',
   };
-
-  // ─────────────────────────────────────────────
-  // SSH & Connection Methods
-  // ─────────────────────────────────────────────
 
   Future<bool> connect({
     required String ipAddress,
@@ -117,19 +111,12 @@ class LgService {
       );
       await client.authenticated;
       _client = client;
-
-      // Open a persistent SFTP session for file uploads
       try {
         _sftp = await client.sftp();
       } catch (_) {
-        // SFTP may fail on some setups; fall back to shell commands
         _sftp = null;
       }
-
-      // Verify kml folder exists and is writable, create if not
       await execute('mkdir -p $_kmlDir');
-
-      // Do the same for slave screens
       for (int i = 2; i <= screenCount; i++) {
         try {
           await execute(
@@ -138,11 +125,9 @@ class LgService {
           );
         } catch (_) {}
       }
-
-      // Try to auto-detect web server port if not manually specified
       int detectedPort = webPort ?? 81;
       if (webPort == null || webPort == 0) {
-        detectedPort = 81; // Default fallback
+        detectedPort = 81;
         try {
           final check80 = await execute(
             'curl -s -o /dev/null -w "%{http_code}" http://localhost:80/ || '
@@ -160,7 +145,6 @@ class LgService {
             }
           }
         } catch (_) {
-          // Fallback to ss/netstat checks if curl/wget is not available
           try {
             final out = await execute(
               '/usr/sbin/ss -tln 2>/dev/null | grep -E ":80|:81" || '
@@ -202,18 +186,13 @@ class LgService {
       ));
 
       _startKeepalive();
-
-      // Set permissions on the KML directory
       await execute('sudo chown -R lg:lg $_kmlDir 2>/dev/null; '
           'chmod -R 755 $_kmlDir 2>/dev/null; '
           'chmod 755 /var/www/html 2>/dev/null');
-
-      // Configure the NetworkLink in Google Earth's MyPlaces.kml
       try {
         await setupNetworkLink();
         await _sendInitialConnectionOverlays();
       } catch (e) {
-        // ignore: avoid_print
         print('Auto setupNetworkLink failed: $e');
       }
 
@@ -243,6 +222,8 @@ class LgService {
     _sftp = null;
     _client?.close();
     _client = null;
+    _uploadedAssets.clear();
+    _imageCache.clear();
     _update(const LGRigState());
   }
 
@@ -253,14 +234,12 @@ class LgService {
     return utf8.decode(result, allowMalformed: true);
   }
 
-  // ─────────────────────────────────────────────
-  // LG Action Methods
-  // ─────────────────────────────────────────────
-
   int? _pendingTimeQueryYear;
   double? _pendingTimeQueryLat;
   double? _pendingTimeQueryLon;
   double? _pendingTimeQueryAlt;
+  double? _pendingTimeQueryTilt;
+  double? _pendingTimeQueryHeading;
   bool _isSendingTimeQuery = false;
 
   /// Immediately sends a time command to Liquid Galaxy query.txt
@@ -270,6 +249,8 @@ class LgService {
     double? latitude,
     double? longitude,
     double? altitude,
+    double? tilt,
+    double? heading,
   }) async {
     if (_client == null || !_state.isConnected) return;
 
@@ -277,6 +258,8 @@ class LgService {
     _pendingTimeQueryLat = latitude;
     _pendingTimeQueryLon = longitude;
     _pendingTimeQueryAlt = altitude;
+    _pendingTimeQueryTilt = tilt;
+    _pendingTimeQueryHeading = heading;
 
     if (_isSendingTimeQuery) return;
     _isSendingTimeQuery = true;
@@ -286,7 +269,9 @@ class LgService {
         final targetYear = _pendingTimeQueryYear!;
         final lat = _pendingTimeQueryLat ?? _lastFlyToLat ?? 28.6139;
         final lon = _pendingTimeQueryLon ?? _lastFlyToLon ?? 77.2090;
-        final alt = _pendingTimeQueryAlt ?? _lastFlyToAlt ?? 45000.0;
+        final alt = _pendingTimeQueryAlt ?? _lastFlyToAlt ?? 500000.0;
+        final t = _pendingTimeQueryTilt ?? _default3DTilt;
+        final h = _pendingTimeQueryHeading ?? _default3DHeading;
         _pendingTimeQueryYear = null;
 
         final timeStr = '$targetYear-01-01T00:00:00Z';
@@ -297,8 +282,8 @@ class LgService {
             '<longitude>$lon</longitude>'
             '<latitude>$lat</latitude>'
             '<altitude>0</altitude>'
-            '<heading>$_default3DHeading</heading>'
-            '<tilt>$_default3DTilt</tilt>'
+            '<heading>$h</heading>'
+            '<tilt>$t</tilt>'
             '<range>$alt</range>'
             '<altitudeMode>relativeToGround</altitudeMode>'
             '<gx:TimeSpan><begin>$timeStr</begin><end>$endStr</end></gx:TimeSpan>'
@@ -313,8 +298,6 @@ class LgService {
       _isSendingTimeQuery = false;
     }
   }
-
-  // ── Bi-directional LG viewpoint synchronization stream ──────────────────
   Timer? _bgViewpointTimer;
   final _viewpointCtrl = StreamController<LgViewpoint>.broadcast();
 
@@ -353,12 +336,9 @@ class LgService {
 
   LgViewpoint? _parseLgQueryViewpoint(String queryText) {
     try {
-      // 1. Try XML tag format: <latitude>-3.4653</latitude>, <longitude>-62.2159</longitude>
       var latMatch = RegExp(r'<latitude>\s*([0-9.-]+)\s*</latitude>').firstMatch(queryText);
       var lonMatch = RegExp(r'<longitude>\s*([0-9.-]+)\s*</longitude>').firstMatch(queryText);
       var rangeMatch = RegExp(r'<range>\s*([0-9.-]+)\s*</range>').firstMatch(queryText);
-
-      // 2. Try query param format: latitude=-3.4653, longitude=-62.2159
       latMatch ??= RegExp(r'latitude=([0-9.-]+)').firstMatch(queryText);
       lonMatch ??= RegExp(r'longitude=([0-9.-]+)').firstMatch(queryText);
       rangeMatch ??= RegExp(r'range=([0-9.-]+)').firstMatch(queryText);
@@ -407,46 +387,23 @@ class LgService {
 
   Future<void> sendKml(String kmlFilename, {String? kmlContent}) async {
     if (_client == null) throw Exception('Not connected');
-
-    // Automatically upload logo overlay asset to the LG web server
     final category = _extractCategoryFromFilename(kmlFilename);
     await _uploadOverlayAssets(category);
 
     final host = _state.ipAddress ?? 'localhost';
+    final webPort = _state.webPort;
     final masterKmlFilename = 'master_$kmlFilename';
     final slaveKmlFilename = 'slave_$kmlFilename';
-
-    if (kmlContent != null && kmlContent.isNotEmpty) {
-      final masterContent = _stripBalloonVisibility(kmlContent);
-      final slaveContent = _stripTimeSpans(kmlContent);
-
-      await _sftpUpload('$_kmlDir/$kmlFilename', utf8.encode(masterContent));
-      await _sftpUpload('$_kmlDir/$masterKmlFilename', utf8.encode(masterContent));
-      await _sftpUpload('$_kmlDir/$slaveKmlFilename', utf8.encode(slaveContent));
-    }
-
-    final masterNetLinkKml = _buildNetworkLinkKml('http://$host:${_state.webPort}/kml/$masterKmlFilename');
-    final slaveNetLinkKml = _buildNetworkLinkKml('http://$host:${_state.webPort}/kml/$slaveKmlFilename');
+    final leftKmlFilename = 'left_$kmlFilename';
 
     final leftScreenIndex = getLeftMostScreenNumber(_state.screenCount);
     final masterScreenIndex = getMasterScreenNumber(_state.screenCount);
     final rightScreenIndex = getRightMostScreenNumber(_state.screenCount);
 
-    for (int i = 1; i <= _state.screenCount; i++) {
-      if (i == masterScreenIndex) {
-        await _sftpUpload('$_kmlDir/kml_$i.kml', utf8.encode(masterNetLinkKml));
-        await _sftpUpload('$_kmlDir/master.kml', utf8.encode(masterNetLinkKml));
-      } else {
-        await _sftpUpload('$_kmlDir/kml_$i.kml', utf8.encode(slaveNetLinkKml));
-        await _sftpUpload('$_kmlDir/slave_$i.kml', utf8.encode(slaveNetLinkKml));
-      }
-    }
-
     if (kmlContent != null && kmlContent.isNotEmpty) {
       final sceneOnly = _stripScreenOverlays(kmlContent);
       final logoBlock = _extractScreenOverlay(kmlContent, 'lg_logo.png');
 
-      final webPort = _state.webPort;
       final effectiveLogoBlock = logoBlock.isNotEmpty
           ? logoBlock
           : '''<ScreenOverlay>
@@ -457,35 +414,51 @@ class LgService {
       <rotationXY x="0" y="0" xunits="fraction" yunits="fraction"/>
       <size x="180" y="180" xunits="pixels" yunits="pixels"/>
     </ScreenOverlay>''';
+      final masterContent = _stripBalloonVisibility(sceneOnly);
+      var leftMostContent = _stripBalloonVisibility(_stripTimeSpans(sceneOnly));
+      if (!leftMostContent.contains('<ScreenOverlay>')) {
+        leftMostContent = leftMostContent.replaceFirst('</Document>', '$effectiveLogoBlock</Document>');
+      }
+      final rightMostContent = _ensureBalloonVisibility(_stripTimeSpans(sceneOnly));
+      final slaveContent = _stripBalloonVisibility(_stripTimeSpans(sceneOnly));
+
+      final rightKmlFilename = 'right_$kmlFilename';
+      final masterNetLinkKml = _buildNetworkLinkKml('http://$host:$webPort/kml/$masterKmlFilename');
+      final slaveNetLinkKml = _buildNetworkLinkKml('http://$host:$webPort/kml/$slaveKmlFilename');
+
+      final uploadMap = <String, List<int>>{
+        '$_kmlDir/$kmlFilename': utf8.encode(masterContent),
+        '$_kmlDir/$masterKmlFilename': utf8.encode(masterContent),
+        '$_kmlDir/$slaveKmlFilename': utf8.encode(slaveContent),
+        '$_kmlDir/$leftKmlFilename': utf8.encode(leftMostContent),
+        '$_kmlDir/$rightKmlFilename': utf8.encode(rightMostContent),
+        _kmlSyncFile: utf8.encode(slaveContent),
+      };
 
       for (int i = 1; i <= _state.screenCount; i++) {
-        var screenKml = sceneOnly;
-
         if (i == masterScreenIndex) {
-          // Master screen (Screen 1): Retains TimeSpan & gx:TimeStamp so the Time Slider GUI renders ONLY on LG Master!
-          screenKml = _stripBalloonVisibility(screenKml);
+          uploadMap['$_kmlDir/kml_$i.kml'] = utf8.encode(masterNetLinkKml);
+          uploadMap['$_kmlDir/master.kml'] = utf8.encode(masterNetLinkKml);
+          uploadMap['/var/www/html/kmls_$i.txt'] = utf8.encode(masterContent);
+        } else if (i == leftScreenIndex) {
+          uploadMap['$_kmlDir/kml_$i.kml'] = utf8.encode(slaveNetLinkKml);
+          uploadMap['/var/www/html/kmls_$i.txt'] = utf8.encode(leftMostContent);
+        } else if (i == rightScreenIndex) {
+          uploadMap['$_kmlDir/kml_$i.kml'] = utf8.encode(slaveNetLinkKml);
+          uploadMap['/var/www/html/kmls_$i.txt'] = utf8.encode(rightMostContent);
         } else {
-          // All slave screens (Screens 2+): Explicitly strip ALL TimeSpan and TimeStamp tags so no slider is ever rendered on slaves!
-          screenKml = _stripTimeSpans(screenKml);
-          if (i == leftScreenIndex) {
-            screenKml = _stripPlacemarks(screenKml);
-            screenKml = screenKml.replaceFirst('</Document>', '$effectiveLogoBlock</Document>');
-          } else if (i == rightScreenIndex) {
-            screenKml = _ensureBalloonVisibility(screenKml);
-          } else {
-            screenKml = _stripBalloonVisibility(screenKml);
-          }
+          uploadMap['$_kmlDir/kml_$i.kml'] = utf8.encode(slaveNetLinkKml);
+          uploadMap['/var/www/html/kmls_$i.txt'] = utf8.encode(slaveContent);
         }
-
-        final screenBytes = utf8.encode(screenKml);
-        await _sftpUpload('/var/www/html/kmls_$i.txt', screenBytes);
       }
 
-      // Also upload a slave-sanitized version (without TimeSpans) to the legacy shared /var/www/html/kmls.txt
-      // so if any slave node polls kmls.txt, it will NEVER display a time slider on the slave screen!
-      final sharedSlaveKml = _stripTimeSpans(sceneOnly);
-      await _sftpUpload(_kmlSyncFile, utf8.encode(sharedSlaveKml));
+      for (final entry in uploadMap.entries) {
+        await _sftpUpload(entry.key, entry.value);
+      }
     } else {
+      final masterNetLinkKml = _buildNetworkLinkKml('http://$host:$webPort/kml/$masterKmlFilename');
+      final slaveNetLinkKml = _buildNetworkLinkKml('http://$host:$webPort/kml/$slaveKmlFilename');
+
       await _sftpUpload(_kmlSyncFile, utf8.encode(slaveNetLinkKml));
       for (int i = 1; i <= _state.screenCount; i++) {
         final netLink = (i == masterScreenIndex) ? masterNetLinkKml : slaveNetLinkKml;
@@ -576,15 +549,17 @@ class LgService {
             caseSensitive: false,
           ),
           '',
+        )
+        .replaceAll(
+          RegExp(
+            r'<when>[^<]*</when>|<begin>[^<]*</begin>|<end>[^<]*</end>|<gx:begin>[^<]*</gx:begin>|<gx:end>[^<]*</gx:end>',
+            caseSensitive: false,
+            dotAll: true,
+          ),
+          '',
         );
   }
 
-  String _stripPlacemarks(String kml) {
-    return kml.replaceAll(
-      RegExp(r'<Placemark>.*?</Placemark>', dotAll: true),
-      '',
-    );
-  }
 
   Future<void> _sendInitialConnectionOverlays() async {
     if (_client == null || !_state.isConnected) return;
@@ -650,20 +625,59 @@ class LgService {
     return LGOverlays.createLgLogoPng();
   }
 
-  Future<void> _uploadOverlayAssets(String category) async {
-    if (_client == null) return;
+  final Set<String> _uploadedAssets = {};
+  final Map<String, Uint8List> _imageCache = {};
+
+  Future<Uint8List> _fetchOrLoadRegionImagePng(ClimateRegion r) async {
+    if (_imageCache.containsKey(r.id)) return _imageCache[r.id]!;
     try {
-      final logoPng = await _fetchOrGenerateLgLogoPng();
-      await _sftpUpload('$_kmlDir/lg_logo.png', logoPng);
-
-      final legendPng = LGOverlays.createLegendPng(category);
-      await _sftpUpload('$_kmlDir/legend_$category.png', legendPng);
-
-      await execute("chmod 644 $_kmlDir/*.png 2>/dev/null");
+      final file = File(r.assetPath);
+      if (await file.exists()) {
+        final bytes = await file.readAsBytes();
+        if (bytes.isNotEmpty) {
+          _imageCache[r.id] = bytes;
+          return bytes;
+        }
+      }
     } catch (_) {}
+    try {
+      final res = await http.get(Uri.parse(r.imageUrl)).timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+        _imageCache[r.id] = res.bodyBytes;
+        return res.bodyBytes;
+      }
+    } catch (_) {}
+    final fallback = LGOverlays.createRegionBannerPng(r.id, r.name, r.category);
+    _imageCache[r.id] = fallback;
+    return fallback;
   }
 
-  // Uploads data to remotePath via SFTP or falls back to a base64 shell pipe.
+  Future<void> _uploadOverlayAssets(String category) async {
+    if (_client == null || !_state.isConnected) return;
+    try {
+      if (!_uploadedAssets.contains('logo')) {
+        final logoPng = await _fetchOrGenerateLgLogoPng();
+        await _sftpUpload('$_kmlDir/lg_logo.png', logoPng);
+        _uploadedAssets.add('logo');
+      }
+
+      final legendKey = 'legend_$category';
+      if (!_uploadedAssets.contains(legendKey)) {
+        final legendPng = LGOverlays.createLegendPng(category);
+        await _sftpUpload('$_kmlDir/legend_$category.png', legendPng);
+        _uploadedAssets.add(legendKey);
+      }
+
+      for (final r in kDefaultRegions) {
+        final regionKey = 'region_${r.id}';
+        if (!_uploadedAssets.contains(regionKey)) {
+          final regionPng = await _fetchOrLoadRegionImagePng(r);
+          await _sftpUpload('$_kmlDir/region_${r.id}.png', regionPng);
+          _uploadedAssets.add(regionKey);
+        }
+      }
+    } catch (_) {}
+  }
   Future<void> _sftpUpload(String remotePath, List<int> data) async {
     if (_sftp != null) {
       try {
@@ -675,11 +689,9 @@ class LgService {
         );
         await file.writeBytes(Uint8List.fromList(data));
         await file.close();
-        await execute('chmod 644 $remotePath 2>/dev/null');
         return;
       } catch (e) {
-        // ignore: avoid_print
-        print('SFTP upload failed for $remotePath: $e — falling back to shell');
+        debugPrint('SFTP upload fallback for $remotePath: $e');
       }
     }
 
@@ -697,8 +709,6 @@ class LgService {
       }
       await execute('base64 -d $remotePath.b64 > $remotePath && rm -f $remotePath.b64');
     }
-
-    await execute('chmod 644 $remotePath 2>/dev/null');
   }
 
   String _extractCategoryFromFilename(String filename) {
@@ -730,15 +740,13 @@ class LgService {
 
     final targetLat = latitude ?? _lastFlyToLat ?? 28.6139;
     final targetLon = longitude ?? _lastFlyToLon ?? 77.2090;
-    final targetAlt = altitude ?? _lastFlyToAlt ?? 45000.0;
+    final targetAlt = altitude ?? _lastFlyToAlt ?? 500000.0;
 
     _lastFlyToLat = targetLat;
     _lastFlyToLon = targetLon;
     _lastFlyToAlt = targetAlt;
 
     _update(_state.copyWith(isOrbiting: true));
-
-    // First fly to the target KML coordinate so Google Earth travels to destination
     try {
       final initialLookAtKml =
           'flytoview=<LookAt>'
@@ -752,13 +760,9 @@ class LgService {
           '</LookAt>';
       await execute("echo '$initialLookAtKml' > $_queryFile");
     } catch (_) {}
-
-    // Wait until Google Earth's camera flight reaches the target KML coordinate
     if (flightDelay > Duration.zero) {
       await Future.delayed(flightDelay);
     }
-
-    // Abort if orbit was stopped or disconnected while flying to coordinate
     if (!_state.isOrbiting || _client == null || !_state.isConnected) {
       return;
     }
@@ -882,26 +886,16 @@ class LgService {
 
   Future<void> clearKml() async {
     if (_client == null) throw Exception('Not connected');
-
-    // A minimal valid-but-empty KML document.  Writing an empty string or
-    // blank line to the sync file causes Google Earth to reject it as
-    // invalid XML and stop polling, so we use this instead.
     const emptyKml =
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<kml xmlns="http://www.opengis.net/kml/2.2">'
         '<Document><name>Empty</name></Document></kml>';
     final emptyBytes = utf8.encode(emptyKml);
-
-    // Clear KML files on master
     await execute("rm -f $_kmlDir/*.kml 2>&1");
-
-    // Write empty-but-valid KML to sync files so GE keeps polling
     await _sftpUpload(_kmlSyncFile, emptyBytes);
     for (int i = 1; i <= _state.screenCount; i++) {
       await _sftpUpload('/var/www/html/kmls_$i.txt', emptyBytes);
     }
-
-    // Clear KML files on slave screens
     for (int i = 2; i <= _state.screenCount; i++) {
       try {
         await execute(
@@ -923,8 +917,6 @@ class LgService {
 
     final ip = _state.ipAddress ?? 'localhost';
     final port = _state.webPort;
-
-    // 1. Force kill Google Earth on Master and Slaves first to prevent setting overwrite on exit
     try {
       await execute('killall -9 googleearth-bin googleearth 2>/dev/null || pkill -9 googleearth 2>/dev/null');
     } catch (_) {}
@@ -937,22 +929,11 @@ class LgService {
         await execute(killCmd);
       } catch (_) {}
     }
-
-    // Wait for Google Earth processes to exit
     await Future.delayed(const Duration(milliseconds: 800));
-
-    // 2. Set up Master Node (Screen 1) pointing to its OWN sync file,
-    //    kmls_1.txt — not the shared kmls.txt. Every screen used to poll
-    //    the exact same file, so every screen showed identical content
-    //    (including the logo AND legend overlays stacked on every screen).
-    //    Each screen now gets a distinct file so we can vary content
-    //    per-screen (logo only on screen 1, legend only on the last screen).
     final masterLinkKml = _buildSyncPlacesKml('http://localhost:$port/kmls_1.txt');
     final masterBytes = utf8.encode(masterLinkKml);
 
     await execute('mkdir -p /home/lg/.googleearth /home/lg/.local/share/Google/GoogleEarth');
-
-    // Use SFTP to write MyPlaces.kml on master — no shell escaping issues
     for (final path in [
       '/home/lg/.googleearth/MyPlaces.kml',
       '/home/lg/.googleearth/myplaces.kml',
@@ -961,27 +942,16 @@ class LgService {
     ]) {
       await _sftpUpload(path, masterBytes);
     }
-
-    // 3. Set up Slave Nodes (Screen 2 to screenCount), each pointing to its
-    //    OWN sync file http://$ip:$port/kmls_$i.txt (not the shared
-    //    kmls.txt) so different screens can show different content.
-    //    Strategy: write a slave KML per screen index to a temp file on the
-    //    master, then scp it to each corresponding slave — this avoids all
-    //    nested quoting issues.
     const slaveTmp = '/tmp/_cs_slave_myplaces.kml';
 
     for (int i = 2; i <= _state.screenCount; i++) {
       try {
         final slaveLinkKml = _buildSyncPlacesKml('http://$ip:$port/kmls_$i.txt');
         await _sftpUpload(slaveTmp, utf8.encode(slaveLinkKml));
-
-        // Create target directories on slave
         await execute(
           'sshpass -p lg ssh -o StrictHostKeyChecking=no lg@lg$i '
           '"mkdir -p /home/lg/.googleearth /home/lg/.local/share/Google/GoogleEarth"'
         );
-
-        // Copy the KML file from master to each slave via scp
         for (final destPath in [
           '/home/lg/.googleearth/MyPlaces.kml',
           '/home/lg/.googleearth/myplaces.kml',
@@ -995,17 +965,8 @@ class LgService {
         }
       } catch (_) {}
     }
-
-    // Clean up temp file
     await execute('rm -f $slaveTmp 2>/dev/null');
-
-    // Wait for the files to write completely
     await Future.delayed(const Duration(milliseconds: 300));
-
-    // 4. Seed the sync file with a valid-but-empty KML document so that
-    //    Google Earth has something to parse on its very first poll.
-    //    Without this, GE may encounter a missing or empty file and stop
-    //    polling kmls.txt entirely.
     const seedKml =
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<kml xmlns="http://www.opengis.net/kml/2.2">'
@@ -1015,8 +976,6 @@ class LgService {
     for (int i = 1; i <= _state.screenCount; i++) {
       await _sftpUpload('/var/www/html/kmls_$i.txt', seedBytes);
     }
-
-    // 5. Relaunch Google Earth on all screens to apply changes
     await relaunchGoogleEarth();
     for (int i = 2; i <= _state.screenCount; i++) {
       try {
@@ -1053,19 +1012,13 @@ class LgService {
 </kml>''';
   }
 
-  // ─────────────────────────────────────────────
-  // KML Generation Methods
-  // ─────────────────────────────────────────────
-
   Future<Directory> get _localKmlDir async {
     final appDir = await getApplicationDocumentsDirectory();
     final dir = Directory('${appDir.path}/kmls');
     if (!dir.existsSync()) dir.createSync(recursive: true);
     return dir;
   }
-
-  // Increment to invalidate cached KML files when generator logic changes
-  static const int _kmlCacheVersion = 15;
+  static const int _kmlCacheVersion = 60;
 
   Future<String> buildKml({
     required ClimateRegion region,
@@ -1145,8 +1098,6 @@ class LgService {
       regionData: regionData,
     );
   }
-
-  // Size of regional box in degrees
   static const double _overlayDegreeOffset = 2.0;
 
   String _buildGibsOverlayUrl(
@@ -1179,12 +1130,19 @@ class LgService {
         '&BBOX=$west,$south,$east,$north'
         '&TRANSPARENT=TRUE'
         '&TIME=$date';
-    // Ampersands must be escaped as &amp; in KML
     return url.replaceAll('&', '&amp;');
   }
 
+  static double? _cachedNoaaTemp;
+  static DateTime? _lastNoaaFetch;
+
   Future<double?> _fetchNoaaTemperature(String? apiKey) async {
     if (apiKey == null || apiKey.isEmpty) return null;
+    if (_cachedNoaaTemp != null && _lastNoaaFetch != null) {
+      if (DateTime.now().difference(_lastNoaaFetch!).inHours < 1) {
+        return _cachedNoaaTemp;
+      }
+    }
     try {
       final uri = Uri.parse(
         '$_noaaBase/data?datasetid=GHCND'
@@ -1194,14 +1152,18 @@ class LgService {
         '&sortfield=date&sortorder=desc',
       );
       final res = await http.get(uri,
-          headers: {'token': apiKey}).timeout(const Duration(seconds: 8));
+          headers: {'token': apiKey}).timeout(const Duration(seconds: 2));
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body);
         final value = body['results']?[0]?['value'] as num?;
+        if (value != null) {
+          _cachedNoaaTemp = value.toDouble();
+          _lastNoaaFetch = DateTime.now();
+        }
         return value?.toDouble();
       }
     } catch (_) {}
-    return null;
+    return _cachedNoaaTemp;
   }
 
   double _interpolateMap(Map<int, double> map, int year) {
@@ -1329,16 +1291,12 @@ class LgService {
     }
 
     final isSpecialYear = activeYear != 1900 && activeYear != 2026 && activeYear != 2100;
-
-    // Determine Tipping Point & Severity Badge for active era
     final riskBadgeHtml = switch (activeYear) {
-      <= 1950 => "<span style='background:#2ecc71;color:#ffffff;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:bold;'>🟢 BASELINE EQUILIBRIUM</span>",
-      <= 1999 => "<span style='background:#f1c40f;color:#000000;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:bold;'>🟡 ELEVATED CLIMATE STRESS</span>",
-      <= 2049 => "<span style='background:#e67e22;color:#ffffff;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:bold;'>🟧 ACTIVE TIPPING RISK</span>",
-      _       => "<span style='background:#e74c3c;color:#ffffff;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:bold;'>🔴 CRITICAL TIPPING POINT BREACH</span>",
+      <= 1950 => "<span style='background:#2ecc71;color:#ffffff;padding:5px 12px;border-radius:14px;font-size:14px;font-weight:bold;display:inline-block;'>🟢 BASELINE EQUILIBRIUM</span>",
+      <= 1999 => "<span style='background:#f1c40f;color:#000000;padding:5px 12px;border-radius:14px;font-size:14px;font-weight:bold;display:inline-block;'>🟡 ELEVATED CLIMATE STRESS</span>",
+      <= 2049 => "<span style='background:#e67e22;color:#ffffff;padding:5px 12px;border-radius:14px;font-size:14px;font-weight:bold;display:inline-block;'>🟧 ACTIVE TIPPING RISK</span>",
+      _       => "<span style='background:#e74c3c;color:#ffffff;padding:5px 12px;border-radius:14px;font-size:14px;font-weight:bold;display:inline-block;'>🔴 CRITICAL TIPPING POINT BREACH</span>",
     };
-
-    // Regional Action & Mitigation Guide
     final actionGuideHtml = switch (region.category) {
       'glacier'  => 'Enforce Paris Agreement net-zero emissions targets; protect alpine watershed infrastructure; deploy early warning systems for glacial lake outburst floods.',
       'sealevel' => 'Construct nature-based living shorelines and sea walls; restore mangrove ecosystems; implement climate-managed retreat and aquifer protection plans.',
@@ -1366,9 +1324,10 @@ class LgService {
 
     <Style id="customBalloon">
       <BalloonStyle>
+        <bgColor>ff0f172a</bgColor>
+        <textColor>fff8fafc</textColor>
         <text><![CDATA[
-          <font face="Helvetica, Arial, sans-serif">
-            <h3>\$[name]</h3>
+          <font face="Helvetica, Arial, sans-serif" color="#f8fafc">
             \$[description]
           </font>
         ]]></text>
@@ -1389,17 +1348,6 @@ class LgService {
       </gx:TimeStamp>
     </LookAt>
 
-    <!-- Screen 1 Overlay: Liquid Galaxy Logo -->
-    <ScreenOverlay>
-      <name>Liquid Galaxy Logo</name>
-      <Icon>
-        <href>http://$host:$port/kml/lg_logo.png</href>
-      </Icon>
-      <overlayXY x="0" y="1" xunits="fraction" yunits="fraction"/>
-      <screenXY x="0.02" y="0.95" xunits="fraction" yunits="fraction"/>
-      <rotationXY x="0" y="0" xunits="fraction" yunits="fraction"/>
-      <size x="180" y="180" xunits="pixels" yunits="pixels"/>
-    </ScreenOverlay>
 
     <!-- Main Region Scientific Data Placemark -->
     <Placemark>
@@ -1408,65 +1356,65 @@ class LgService {
       <gx:balloonVisibility>1</gx:balloonVisibility>
       <styleUrl>#customBalloon</styleUrl>
       <description><![CDATA[
-        <div style='font-family:Helvetica,Arial,sans-serif;max-width:460px;background:#0f172a;color:#f8fafc;padding:12px;border-radius:10px;box-shadow:0 4px 15px rgba(0,0,0,0.5);'>
-        <img src='${region.imageUrl}' style='width:100%;max-height:200px;object-fit:cover;border-radius:8px;margin-bottom:12px;border:1px solid #334155;' />
+        <div style='font-family:Helvetica,Arial,sans-serif;max-width:580px;background:#0f172a;color:#f8fafc;padding:20px 24px;border-radius:12px;border:1px solid #334155;box-shadow:0 8px 30px rgba(0,0,0,0.6);'>
+        <img src='http://$host:$port/kml/region_${region.id}.png' onerror="this.src='${region.imageUrl}';" style='width:100%;max-height:220px;object-fit:cover;border-radius:10px;margin-bottom:14px;border:1px solid #334155;' />
         
         <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;'>
-          <h2 style='color:#38bdf8;margin:0;font-size:18px;'>${region.name}</h2>
+          <h2 style='color:#38bdf8;margin:0;font-size:24px;font-weight:700;letter-spacing:-0.3px;'>${region.name}</h2>
         </div>
-        <div style='margin-bottom:12px;'>$riskBadgeHtml</div>
+        <div style='margin-bottom:14px;'>$riskBadgeHtml</div>
 
-        <p style='color:#94a3b8;font-size:12px;margin:0 0 12px;line-height:1.4;'><b>Active Era:</b> $activeYear (${era.label}) &bull; Scientific projection under IPCC AR6 SSP3-7.0</p>
+        <p style='color:#94a3b8;font-size:16px;margin:0 0 14px;line-height:1.5;'><b>Active Era:</b> $activeYear (${era.label}) &bull; IPCC AR6 SSP3-7.0</p>
         
         <!-- Multi-Era Metrics Matrix -->
-        <table style='border-collapse:collapse;width:100%;font-size:12px;margin-bottom:12px;'>
+        <table style='border-collapse:collapse;width:100%;font-size:15px;margin-bottom:14px;'>
           <tr style='background:#1e293b;color:#e2e8f0;'>
-            <th style='padding:7px 8px;text-align:left;'>Era / Year</th>
-            <th style='padding:7px 8px;text-align:center;'>Temp &Delta;</th>
-            <th style='padding:7px 8px;text-align:center;'>$statHeader</th>
-            <th style='padding:7px 8px;text-align:center;'>Impact</th>
+            <th style='padding:8px 10px;text-align:left;font-size:15px;'>Era / Year</th>
+            <th style='padding:8px 10px;text-align:center;font-size:15px;'>Temp &Delta;</th>
+            <th style='padding:8px 10px;text-align:center;font-size:15px;'>$statHeader</th>
+            <th style='padding:8px 10px;text-align:center;font-size:15px;'>Impact</th>
           </tr>
           <tr style='background:${activeYear == 1900 ? '#14532d' : '#0f172a'};color:#4ade80;'>
-            <td style='padding:6px 8px;'>${activeYear == 1900 ? '&#9654; ' : ''}1900 (Baseline)</td>
-            <td style='padding:6px 8px;text-align:center;'>+${pastTemp.toStringAsFixed(1)}&deg;C</td>
-            <td style='padding:6px 8px;text-align:center;'>$pastStat</td>
-            <td style='padding:6px 8px;text-align:center;'>Stable</td>
+            <td style='padding:8px 10px;'>${activeYear == 1900 ? '&#9654; ' : ''}1900 (Baseline)</td>
+            <td style='padding:8px 10px;text-align:center;'>+${pastTemp.toStringAsFixed(1)}&deg;C</td>
+            <td style='padding:8px 10px;text-align:center;'>$pastStat</td>
+            <td style='padding:8px 10px;text-align:center;'>Stable</td>
           </tr>
           ${isSpecialYear ? '''
           <tr style='background:#1e3a8a;color:#38bdf8;font-weight:bold;'>
-            <td style='padding:6px 8px;'>&#9654; $activeYear (Active)</td>
-            <td style='padding:6px 8px;text-align:center;'>+${activeTemp.toStringAsFixed(1)}&deg;C</td>
-            <td style='padding:6px 8px;text-align:center;'>$activeStat</td>
-            <td style='padding:6px 8px;text-align:center;'>&#9733; Active</td>
+            <td style='padding:8px 10px;'>&#9654; $activeYear (Active)</td>
+            <td style='padding:8px 10px;text-align:center;'>+${activeTemp.toStringAsFixed(1)}&deg;C</td>
+            <td style='padding:8px 10px;text-align:center;'>$activeStat</td>
+            <td style='padding:8px 10px;text-align:center;'>&#9733; Active</td>
           </tr>
           ''' : ''}
           <tr style='background:${activeYear == 2026 ? '#365314' : '#0f172a'};color:#facc15;'>
-            <td style='padding:6px 8px;'>${activeYear == 2026 ? '&#9654; ' : ''}<b>2026 (Present)</b></td>
-            <td style='padding:6px 8px;text-align:center;'><b>+${nowTemp.toStringAsFixed(1)}&deg;C</b></td>
-            <td style='padding:6px 8px;text-align:center;'><b>$nowStat</b></td>
-            <td style='padding:6px 8px;text-align:center;'>${region.category == 'forest' || region.category == 'glacier' ? '&#8675; Declining' : '&#8673; Rising'}</td>
+            <td style='padding:8px 10px;'>${activeYear == 2026 ? '&#9654; ' : ''}<b>2026 (Present)</b></td>
+            <td style='padding:8px 10px;text-align:center;'><b>+${nowTemp.toStringAsFixed(1)}&deg;C</b></td>
+            <td style='padding:8px 10px;text-align:center;'><b>$nowStat</b></td>
+            <td style='padding:8px 10px;text-align:center;'>${region.category == 'forest' || region.category == 'glacier' ? '&#8675; Declining' : '&#8673; Rising'}</td>
           </tr>
           <tr style='background:${activeYear == 2100 ? '#7f1d1d' : '#0f172a'};color:#f87171;'>
-            <td style='padding:6px 8px;'>${activeYear == 2100 ? '&#9654; ' : ''}<b>2100 (Projected)</b></td>
-            <td style='padding:6px 8px;text-align:center;'><b>+${futureTemp.toStringAsFixed(1)}&deg;C</b></td>
-            <td style='padding:6px 8px;text-align:center;'><b>$futureStat</b></td>
-            <td style='padding:6px 8px;text-align:center;'>${region.category == 'forest' || region.category == 'glacier' ? '&#8675;&#8675; Severe' : '&#8673;&#8673; Severe'}</td>
+            <td style='padding:8px 10px;'>${activeYear == 2100 ? '&#9654; ' : ''}<b>2100 (Projected)</b></td>
+            <td style='padding:8px 10px;text-align:center;'><b>+${futureTemp.toStringAsFixed(1)}&deg;C</b></td>
+            <td style='padding:8px 10px;text-align:center;'><b>$futureStat</b></td>
+            <td style='padding:8px 10px;text-align:center;'>${region.category == 'forest' || region.category == 'glacier' ? '&#8675;&#8675; Severe' : '&#8673;&#8673; Severe'}</td>
           </tr>
         </table>
 
         <!-- Narrative Context -->
-        <div style='margin-bottom:10px;padding:10px;background:#1e293b;border-left:4px solid #38bdf8;border-radius:4px;'>
-          <b style='color:#38bdf8;font-size:13px;'>Scientific Narrative Analysis:</b><br/>
-          <span style='color:#cbd5e1;font-size:12px;line-height:1.4;'>$description</span>
+        <div style='margin-bottom:12px;padding:12px 14px;background:#1e293b;border-left:5px solid #38bdf8;border-radius:6px;'>
+          <b style='color:#38bdf8;font-size:16px;display:block;margin-bottom:4px;'>Scientific Narrative Analysis:</b>
+          <span style='color:#cbd5e1;font-size:15px;line-height:1.5;'>$description</span>
         </div>
 
         <!-- Mitigation & Adaptation Plan -->
-        <div style='margin-bottom:10px;padding:10px;background:#142834;border-left:4px solid #22c55e;border-radius:4px;'>
-          <b style='color:#22c55e;font-size:13px;'>Climate Resilience & Mitigation Plan:</b><br/>
-          <span style='color:#cbd5e1;font-size:12px;line-height:1.4;'>$actionGuideHtml</span>
+        <div style='margin-bottom:12px;padding:12px 14px;background:#142834;border-left:5px solid #22c55e;border-radius:6px;'>
+          <b style='color:#22c55e;font-size:16px;display:block;margin-bottom:4px;'>Climate Resilience &amp; Mitigation Plan:</b>
+          <span style='color:#cbd5e1;font-size:15px;line-height:1.5;'>$actionGuideHtml</span>
         </div>
 
-        <p style='color:#64748b;font-size:10px;margin-top:8px;line-height:1.3;'>
+        <p style='color:#64748b;font-size:12px;margin-top:10px;line-height:1.4;'>
           <i>Data Sources: ${region.category == 'aqi' ? 'OpenAQ / WHO (2026); IPCC AR6 Scenarios (2100)' : 'IPCC AR6 Working Group I/II (SSP3-7.0) &bull; NASA Earthdata GIBS &bull; NOAA CDO'}</i>
         </p>
         </div>
@@ -1496,7 +1444,7 @@ class LgService {
 </kml>''';
   }
 
-  /// Builds localized monitoring sub-station placemarks for each region.
+  /// Builds localized monitoring sub-station placemarks and 3D sensor beacons for each region.
   String _buildSubStationPlacemarks(ClimateRegion region, ClimateEra era, int activeYear) {
     final sb = StringBuffer();
     sb.writeln('<Folder><name>${LG3DVisuals.escapeXmlText(region.name)} Monitoring Network</name><visibility>1</visibility>');
@@ -1543,12 +1491,31 @@ class LgService {
       ],
     };
 
-    for (final st in stations) {
+    for (int idx = 0; idx < stations.length; idx++) {
+      final st = stations[idx];
       final stLat = region.latitude + (st['dLat'] as double);
       final stLon = region.longitude + (st['dLon'] as double);
       final stName = st['name'] as String;
       final stType = st['type'] as String;
-
+      sb.writeln(LG3DVisuals.build3DSensorBeacon(
+        centerLat: stLat,
+        centerLon: stLon,
+        radiusDeg: 0.018,
+        heightMeters: 15000.0,
+        beaconColorAbgr: 'c000e5ff',
+        name: '$stName 3D Beacon',
+        description: '3D Environmental Sensor Node',
+      ));
+      sb.writeln(LG3DVisuals.build3DConnectingCorridor(
+        fromLat: stLat,
+        fromLon: stLon,
+        toLat: region.latitude,
+        toLon: region.longitude,
+        altitudeMeters: 9000.0,
+        lineColorAbgr: 'aa00e5ff',
+        lineWidth: 3.0,
+        name: 'Telemetry Link: $stName -> ${region.name}',
+      ));
       sb.writeln('''
       <Placemark>
         <name>${LG3DVisuals.escapeXmlText(stName)}</name>
@@ -1565,10 +1532,10 @@ class LgService {
           </LabelStyle>
         </Style>
         <description><![CDATA[
-          <div style='font-family:Helvetica,Arial,sans-serif;max-width:320px;background:#0f172a;color:#f8fafc;padding:10px;border-radius:8px;'>
-            <h4 style='color:#00e5ff;margin:0 0 4px;'>$stName</h4>
-            <p style='color:#94a3b8;font-size:11px;margin:0 0 8px;'><b>Station Type:</b> $stType</p>
-            <div style='background:#1e293b;padding:8px;border-radius:4px;font-size:11px;color:#cbd5e1;'>
+          <div style='font-family:Helvetica,Arial,sans-serif;max-width:380px;background:#0f172a;color:#f8fafc;padding:16px 20px;border-radius:10px;border:1px solid #334155;'>
+            <h4 style='color:#00e5ff;margin:0 0 6px;font-size:18px;font-weight:700;'>$stName</h4>
+            <p style='color:#94a3b8;font-size:15px;margin:0 0 10px;'><b>Station Type:</b> $stType</p>
+            <div style='background:#1e293b;padding:10px 12px;border-radius:6px;font-size:14px;color:#cbd5e1;line-height:1.5;'>
               &bull; <b>Active Year:</b> $activeYear<br/>
               &bull; <b>Coordinates:</b> ${stLat.toStringAsFixed(4)}&deg;, ${stLon.toStringAsFixed(4)}&deg;<br/>
               &bull; <b>Status:</b> Telemetry Operational (Real-Time Synchronized)
@@ -1576,7 +1543,7 @@ class LgService {
           </div>
         ]]></description>
         <Point>
-          <coordinates>$stLon,$stLat,0</coordinates>
+          <coordinates>$stLon,$stLat,15000</coordinates>
         </Point>
       </Placemark>''');
     }
@@ -1585,44 +1552,7 @@ class LgService {
     return sb.toString();
   }
 
-  // 6-color spectrum across timeline eras
-  String _severityColorRgb(ClimateEra era) => switch (era) {
-    ClimateEra.preindustrial1900 => '22c55e', // Green
-    ClimateEra.midCentury1950    => '84cc16', // Light Green
-    ClimateEra.lateCentury1980   => 'eab308', // Light Yellow
-    ClimateEra.present2026       => 'facc15', // Yellow
-    ClimateEra.midProjection2060 => 'f97316', // Orange
-    ClimateEra.projected2100     => 'ef4444', // Red
-  };
 
-  // Converts alpha + RRGGBB into KML's required AABBGGRR ordering
-  String _kmlColorAbgr(String alphaHex, String rrggbb) {
-    final rr = rrggbb.substring(0, 2);
-    final gg = rrggbb.substring(2, 4);
-    final bb = rrggbb.substring(4, 6);
-    return '$alphaHex$bb$gg$rr';
-  }
-
-  // Returns a description blurb for a polygon's info balloon
-  String _severityBlurb(String category, ClimateEra era, Map<String, String> eraStats) {
-    final trend = switch (era) {
-      ClimateEra.preindustrial1900 => 'Pre-industrial baseline — before major human-driven warming.',
-      ClimateEra.midCentury1950    => 'Mid 20th Century — post-WWII global industrial acceleration.',
-      ClimateEra.lateCentury1980   => 'Late 20th Century — rapid growth in greenhouse gas emissions.',
-      ClimateEra.present2026       => 'Current conditions — actively worsening global climate impact.',
-      ClimateEra.midProjection2060 => 'Mid 21st Century — projected severe impacts under continued emissions.',
-      ClimateEra.projected2100     => 'Late 21st Century — projected extreme end-of-century scenario.',
-    };
-    final metric = switch (category) {
-      'glacier'  => 'Ice extent: ${eraStats['ice_extent']}',
-      'sealevel' => 'Sea level rise: ${eraStats['sea_level']}',
-      'forest'   => 'Forest cover loss: ${eraStats['forest_loss']}',
-      'heat'     => 'Temperature anomaly: ${eraStats['temp_anomaly']}',
-      'aqi'      => 'Haze/particulate levels shown via NASA MODIS Aerosol Optical Depth — check the region\'s live AQI reading for current conditions.',
-      _ => '',
-    };
-    return '$trend $metric';
-  }
 
   String _buildCategoryLayer(
     ClimateRegion region,
@@ -1632,10 +1562,8 @@ class LgService {
   ) {
     final buffer = StringBuffer();
 
-    buffer.writeln('<Folder><name>${LG3DVisuals.escapeXmlText(region.name)} Progression</name>');
+    buffer.writeln('<Folder><name>${LG3DVisuals.escapeXmlText(region.name)} 3D Geometric Progression</name>');
     buffer.writeln('<visibility>1</visibility><open>1</open>');
-
-    // Build sub-folders per era with TimeSpan for timeline control
     for (final e in ClimateEra.values) {
       final eraStats = _getEraStats(regionData, region.category, int.parse(e.label));
 
@@ -1643,31 +1571,23 @@ class LgService {
       buffer.writeln('<name>${LG3DVisuals.escapeXmlText(region.name)} \u2014 ${e.label}</name>');
       buffer.writeln('<visibility>1</visibility>');
       buffer.writeln(_timeSpanKml(e));
-
-      // Category-specific zone polygon (shape/coordinates unchanged)
       switch (region.category) {
         case 'glacier':
-          buffer.writeln(_glacierPolygon(region, e, eraStats));
+          buffer.writeln(_glacier3DShape(region, e, eraStats));
           break;
         case 'sealevel':
-          buffer.writeln(_seaLevelPolygon(region, e, eraStats));
+          buffer.writeln(_seaLevel3DShape(region, e, eraStats));
           break;
         case 'forest':
-          buffer.writeln(_forestPolygon(region, e, eraStats));
+          buffer.writeln(_forest3DShape(region, e, eraStats));
           break;
         case 'heat':
-          buffer.writeln(_heatPolygon(region, e, eraStats));
+          buffer.writeln(_heat3DShape(region, e, eraStats));
           break;
         case 'aqi':
-          buffer.writeln(_aqiPolygon(region, e, eraStats));
+          buffer.writeln(_aqi3DShape(region, e, eraStats));
           break;
       }
-
-      // Always-visible floating data label with key metric for this era
-      buffer.writeln(_buildDataLabel(region, e, eraStats, regionData));
-
-      // 3D extruded bar whose height encodes metric severity
-      buffer.writeln(_buildDataBar(region, e, eraStats, regionData));
 
       buffer.writeln('</Folder>');
     }
@@ -1676,349 +1596,276 @@ class LgService {
     return buffer.toString();
   }
 
-  String _generateIrregularPolygon(double lat, double lon, double radius, double noise, int seed) {
-    final points = <String>[];
-    final phase = seed * 0.37;
-    for (int i = 0; i <= 32; i++) {
-      final angle = i * (math.pi * 2) / 32;
-      final wobble = (math.sin(angle * 3 + phase) * 0.6 +
-                      math.sin(angle * 5 + phase * 1.3) * 0.4) * noise;
-      final r = (radius + wobble).clamp(radius * 0.4, radius * 1.4);
+  String _heat3DShape(ClimateRegion region, ClimateEra era, Map<String, String> eraStats) {
+    final sb = StringBuffer();
 
-      final pLat = lat + r * math.sin(angle);
-      final pLon = lon + r * math.cos(angle) / math.cos(lat * math.pi / 180);
-      points.add('${pLon.toStringAsFixed(5)},${pLat.toStringAsFixed(5)},0');
-    }
-    return points.join(' ');
-  }
-
-  String _heatPolygon(ClimateRegion region, ClimateEra era, Map<String, String> eraStats) {
-    final opacity = switch (era) {
-      ClimateEra.preindustrial1900 => '44',
-      ClimateEra.midCentury1950    => '66',
-      ClimateEra.lateCentury1980   => '88',
-      ClimateEra.present2026       => 'aa',
-      ClimateEra.midProjection2060 => 'cc',
-      ClimateEra.projected2100     => 'ee',
+    final domeHeight = switch (era) {
+      ClimateEra.preindustrial1900 => 16000.0,
+      ClimateEra.midCentury1950    => 24000.0,
+      ClimateEra.lateCentury1980   => 32000.0,
+      ClimateEra.present2026       => 40000.0,
+      ClimateEra.midProjection2060 => 48000.0,
+      ClimateEra.projected2100     => 56000.0,
     };
-    final color = _kmlColorAbgr(opacity, _severityColorRgb(era));
-    final outlineColor = _kmlColorAbgr('ff', _severityColorRgb(era));
-    final glowColor = _kmlColorAbgr('22', _severityColorRgb(era));
-    // Heat zone expands
-    final radius = switch (era) {
-      ClimateEra.preindustrial1900 => 0.3,
-      ClimateEra.midCentury1950    => 0.5,
-      ClimateEra.lateCentury1980   => 0.7,
-      ClimateEra.present2026       => 0.9,
-      ClimateEra.midProjection2060 => 1.2,
-      ClimateEra.projected2100     => 1.5,
-    };
-    
-    final coords = _generateIrregularPolygon(region.latitude, region.longitude, radius, 0.2, 42);
-    final glowCoords = _generateIrregularPolygon(region.latitude, region.longitude, radius * 1.2, radius * 0.12, 42);
-    final blurb = _severityBlurb('heat', era, eraStats);
-
-    return '''
-    <Placemark>
-      <name>Heat Glow \u2014 ${LG3DVisuals.escapeXmlText(era.label)}</name>
-      <visibility>1</visibility>
-      <Style>
-        <PolyStyle><color>$glowColor</color><outline>0</outline></PolyStyle>
-      </Style>
-      <Polygon>
-        <tessellate>1</tessellate>
-        <outerBoundaryIs><LinearRing><coordinates>$glowCoords</coordinates></LinearRing></outerBoundaryIs>
-      </Polygon>
-    </Placemark>
-    <Placemark>
-      <name>Extreme Heat Area \u2014 ${LG3DVisuals.escapeXmlText(era.label)}</name>
-      <visibility>1</visibility>
-      <description><![CDATA[$blurb]]></description>
-      <Style>
-        <PolyStyle>
-          <color>$color</color>
-          <outline>1</outline>
-        </PolyStyle>
-        <LineStyle>
-          <color>$outlineColor</color>
-          <width>3.5</width>
-        </LineStyle>
-      </Style>
-      <Polygon>
-        <tessellate>1</tessellate>
-        <outerBoundaryIs>
-          <LinearRing>
-            <coordinates>$coords</coordinates>
-          </LinearRing>
-        </outerBoundaryIs>
-      </Polygon>
-    </Placemark>''';
-  }
-
-  String _glacierPolygon(ClimateRegion region, ClimateEra era, Map<String, String> eraStats) {
-    final opacity = switch (era) {
-      ClimateEra.preindustrial1900 => 'bb',
-      ClimateEra.midCentury1950    => '99',
-      ClimateEra.lateCentury1980   => '77',
-      ClimateEra.present2026       => '55',
-      ClimateEra.midProjection2060 => '33',
-      ClimateEra.projected2100     => '22',
-    };
-    final color = _kmlColorAbgr(opacity, _severityColorRgb(era));
-    final outlineColor = _kmlColorAbgr('ff', _severityColorRgb(era));
-    final glowColor = _kmlColorAbgr('22', _severityColorRgb(era));
-    
-    // Glacier shrinks over time
-    final radius = switch (era) {
-      ClimateEra.preindustrial1900 => 0.5,
-      ClimateEra.midCentury1950    => 0.4,
-      ClimateEra.lateCentury1980   => 0.3,
-      ClimateEra.present2026       => 0.2,
-      ClimateEra.midProjection2060 => 0.1,
-      ClimateEra.projected2100     => 0.04,
-    };
-    
-    final coords = _generateIrregularPolygon(region.latitude, region.longitude, radius, 0.1, 88);
-    final glowCoords = _generateIrregularPolygon(region.latitude, region.longitude, radius * 1.3, radius * 0.08, 88);
-    final blurb = _severityBlurb('glacier', era, eraStats);
-
-    return '''
-    <Placemark>
-      <name>Glacier Glow \u2014 ${LG3DVisuals.escapeXmlText(era.label)}</name>
-      <visibility>1</visibility>
-      <Style>
-        <PolyStyle><color>$glowColor</color><outline>0</outline></PolyStyle>
-      </Style>
-      <Polygon>
-        <tessellate>1</tessellate>
-        <outerBoundaryIs><LinearRing><coordinates>$glowCoords</coordinates></LinearRing></outerBoundaryIs>
-      </Polygon>
-    </Placemark>
-    <Placemark>
-      <name>Glacier extent \u2014 ${LG3DVisuals.escapeXmlText(era.label)}</name>
-      <visibility>1</visibility>
-      <description><![CDATA[$blurb]]></description>
-      <Style>
-        <PolyStyle>
-          <color>$color</color>
-          <outline>1</outline>
-        </PolyStyle>
-        <LineStyle>
-          <color>$outlineColor</color>
-          <width>3.5</width>
-        </LineStyle>
-      </Style>
-      <Polygon>
-        <tessellate>1</tessellate>
-        <outerBoundaryIs>
-          <LinearRing>
-            <coordinates>$coords</coordinates>
-          </LinearRing>
-        </outerBoundaryIs>
-      </Polygon>
-    </Placemark>''';
-  }
-
-  String _seaLevelPolygon(ClimateRegion region, ClimateEra era, Map<String, String> eraStats) {
-    final opacity = switch (era) {
-      ClimateEra.preindustrial1900 => '44',
-      ClimateEra.midCentury1950    => '66',
-      ClimateEra.lateCentury1980   => '88',
-      ClimateEra.present2026       => 'aa',
-      ClimateEra.midProjection2060 => 'cc',
-      ClimateEra.projected2100     => 'ee',
-    };
-    final color = _kmlColorAbgr(opacity, _severityColorRgb(era));
-    final outlineColor = _kmlColorAbgr('ff', _severityColorRgb(era));
-    final glowColor = _kmlColorAbgr('22', _severityColorRgb(era));
-
-    final (offsetDeg, radius) = switch (era) {
-      ClimateEra.preindustrial1900 => (0.25, 0.05),
-      ClimateEra.midCentury1950    => (0.20, 0.09),
-      ClimateEra.lateCentury1980   => (0.15, 0.14),
-      ClimateEra.present2026       => (0.10, 0.20),
-      ClimateEra.midProjection2060 => (0.05, 0.28),
-      ClimateEra.projected2100     => (0.00, 0.38),
-    };
-    const bearingRad = 2.356;
-    final centerLat = region.latitude + offsetDeg * math.sin(bearingRad);
-    final centerLon = region.longitude +
-        offsetDeg * math.cos(bearingRad) / math.cos(region.latitude * math.pi / 180);
-
-    final coords = _generateIrregularPolygon(centerLat, centerLon, radius, 0.05, 12);
-    final glowCoords = _generateIrregularPolygon(centerLat, centerLon, radius * 1.25, radius * 0.06, 12);
-    final blurb = _severityBlurb('sealevel', era, eraStats) +
-        (era == ClimateEra.projected2100
-            ? ' Flood zone now reaches the marked location.'
-            : ' Flood zone is ${(offsetDeg * 111).toStringAsFixed(0)} km from the marked location.');
-
-    return '''
-    <Placemark>
-      <name>Sea Level Glow \u2014 ${LG3DVisuals.escapeXmlText(era.label)}</name>
-      <visibility>1</visibility>
-      <Style>
-        <PolyStyle><color>$glowColor</color><outline>0</outline></PolyStyle>
-      </Style>
-      <Polygon>
-        <tessellate>1</tessellate>
-        <outerBoundaryIs><LinearRing><coordinates>$glowCoords</coordinates></LinearRing></outerBoundaryIs>
-      </Polygon>
-    </Placemark>
-    <Placemark>
-      <name>Sea level inundation \u2014 ${LG3DVisuals.escapeXmlText(era.label)}</name>
-      <visibility>1</visibility>
-      <description><![CDATA[$blurb]]></description>
-      <Style>
-        <PolyStyle>
-          <color>$color</color>
-          <outline>1</outline>
-        </PolyStyle>
-        <LineStyle>
-          <color>$outlineColor</color>
-          <width>3.5</width>
-        </LineStyle>
-      </Style>
-      <Polygon>
-        <tessellate>1</tessellate>
-        <outerBoundaryIs>
-          <LinearRing>
-            <coordinates>$coords</coordinates>
-          </LinearRing>
-        </outerBoundaryIs>
-      </Polygon>
-    </Placemark>''';
-  }
-
-  String _forestPolygon(ClimateRegion region, ClimateEra era, Map<String, String> eraStats) {
-    final opacity = switch (era) {
-      ClimateEra.preindustrial1900 => 'bb',
-      ClimateEra.midCentury1950    => '99',
-      ClimateEra.lateCentury1980   => '77',
-      ClimateEra.present2026       => '55',
-      ClimateEra.midProjection2060 => '33',
-      ClimateEra.projected2100     => '22',
-    };
-    final color = _kmlColorAbgr(opacity, _severityColorRgb(era));
-    final outlineColor = _kmlColorAbgr('ff', _severityColorRgb(era));
-    final glowColor = _kmlColorAbgr('22', _severityColorRgb(era));
-    
-    // Forest shrinks
-    final radius = switch (era) {
-      ClimateEra.preindustrial1900 => 0.9,
-      ClimateEra.midCentury1950    => 0.75,
-      ClimateEra.lateCentury1980   => 0.6,
-      ClimateEra.present2026       => 0.45,
-      ClimateEra.midProjection2060 => 0.3,
-      ClimateEra.projected2100     => 0.15,
-    };
-    
-    final coords = _generateIrregularPolygon(region.latitude, region.longitude, radius, 0.2, 55);
-    final glowCoords = _generateIrregularPolygon(region.latitude, region.longitude, radius * 1.2, radius * 0.12, 55);
-    final blurb = _severityBlurb('forest', era, eraStats);
-
-    return '''
-    <Placemark>
-      <name>Forest Glow \u2014 ${LG3DVisuals.escapeXmlText(era.label)}</name>
-      <visibility>1</visibility>
-      <Style>
-        <PolyStyle><color>$glowColor</color><outline>0</outline></PolyStyle>
-      </Style>
-      <Polygon>
-        <tessellate>1</tessellate>
-        <outerBoundaryIs><LinearRing><coordinates>$glowCoords</coordinates></LinearRing></outerBoundaryIs>
-      </Polygon>
-    </Placemark>
-    <Placemark>
-      <name>Forest cover \u2014 ${LG3DVisuals.escapeXmlText(era.label)}</name>
-      <visibility>1</visibility>
-      <description><![CDATA[$blurb]]></description>
-      <Style>
-        <PolyStyle>
-          <color>$color</color>
-          <outline>1</outline>
-        </PolyStyle>
-        <LineStyle>
-          <color>$outlineColor</color>
-          <width>3.5</width>
-        </LineStyle>
-      </Style>
-      <Polygon>
-        <tessellate>1</tessellate>
-        <outerBoundaryIs>
-          <LinearRing>
-            <coordinates>$coords</coordinates>
-          </LinearRing>
-        </outerBoundaryIs>
-      </Polygon>
-    </Placemark>''';
-  }
-
-  String _aqiPolygon(ClimateRegion region, ClimateEra era, Map<String, String> eraStats) {
-    final opacity = switch (era) {
-      ClimateEra.preindustrial1900 => '44',
-      ClimateEra.midCentury1950    => '66',
-      ClimateEra.lateCentury1980   => '88',
-      ClimateEra.present2026       => 'aa',
-      ClimateEra.midProjection2060 => 'cc',
-      ClimateEra.projected2100     => 'ee',
-    };
-    final color = _kmlColorAbgr(opacity, _severityColorRgb(era));
-    final outlineColor = _kmlColorAbgr('ff', _severityColorRgb(era));
-    final glowColor = _kmlColorAbgr('22', _severityColorRgb(era));
-
-    final radius = switch (era) {
+    final domeRadius = switch (era) {
       ClimateEra.preindustrial1900 => 0.25,
-      ClimateEra.midCentury1950    => 0.4,
-      ClimateEra.lateCentury1980   => 0.55,
-      ClimateEra.present2026       => 0.7,
-      ClimateEra.midProjection2060 => 0.85,
-      ClimateEra.projected2100     => 1.0,
+      ClimateEra.midCentury1950    => 0.35,
+      ClimateEra.lateCentury1980   => 0.45,
+      ClimateEra.present2026       => 0.55,
+      ClimateEra.midProjection2060 => 0.65,
+      ClimateEra.projected2100     => 0.75,
     };
 
-    final coords = _generateIrregularPolygon(region.latitude, region.longitude, radius, 0.15, 71);
-    final glowCoords = _generateIrregularPolygon(region.latitude, region.longitude, radius * 1.2, radius * 0.1, 71);
-    final blurb = _severityBlurb('aqi', era, eraStats);
+    final colors = switch (era) {
+      ClimateEra.preindustrial1900 => ['9933cc44', '9955ddaa', '9933cc44', '9955ddaa'],
+      ClimateEra.midCentury1950    => ['aa84cc16', 'aaa3e635', 'aa84cc16', 'aaa3e635'],
+      ClimateEra.lateCentury1980   => ['bbfacc15', 'bbfde047', 'bbfacc15', 'bbfde047'],
+      ClimateEra.present2026       => ['ccf97316', 'ccfb923c', 'ccf97316', 'ccfb923c'],
+      ClimateEra.midProjection2060 => ['ddf97316', 'ddef4444', 'ddf97316', 'ddef4444'],
+      ClimateEra.projected2100     => ['eeb91c1c', 'eeef4444', 'eeb91c1c', 'eeef4444'],
+    };
+    sb.writeln(LG3DVisuals.build3DGeodesicDome(
+      centerLat: region.latitude,
+      centerLon: region.longitude,
+      radiusDeg: domeRadius,
+      heightMeters: domeHeight,
+      segments: 14,
+      faceColorsAbgr: colors,
+      wireColorAbgr: 'ffffaa00',
+      name: '3D Atmospheric Heat Dome — ${era.label}',
+      description: 'Thermal Anomaly Geodesic Structure (${era.label})',
+    ));
 
-    return '''
-    <Placemark>
-      <name>AQI Zone Glow \u2014 ${LG3DVisuals.escapeXmlText(era.label)}</name>
-      <visibility>1</visibility>
-      <Style>
-        <PolyStyle><color>$glowColor</color><outline>0</outline></PolyStyle>
-      </Style>
-      <Polygon>
-        <tessellate>1</tessellate>
-        <outerBoundaryIs><LinearRing><coordinates>$glowCoords</coordinates></LinearRing></outerBoundaryIs>
-      </Polygon>
-    </Placemark>
-    <Placemark>
-      <name>Air Quality Zone \u2014 ${LG3DVisuals.escapeXmlText(era.label)}</name>
-      <visibility>1</visibility>
-      <description><![CDATA[$blurb]]></description>
-      <Style>
-        <PolyStyle>
-          <color>$color</color>
-          <outline>1</outline>
-        </PolyStyle>
-        <LineStyle>
-          <color>$outlineColor</color>
-          <width>3.5</width>
-        </LineStyle>
-      </Style>
-      <Polygon>
-        <tessellate>1</tessellate>
-        <outerBoundaryIs>
-          <LinearRing>
-            <coordinates>$coords</coordinates>
-          </LinearRing>
-        </outerBoundaryIs>
-      </Polygon>
-    </Placemark>''';
+    return sb.toString();
   }
 
-  // ─────────────────────────────────────────────
-  // Visual Enhancement Helpers
-  // ─────────────────────────────────────────────
+  String _glacier3DShape(ClimateRegion region, ClimateEra era, Map<String, String> eraStats) {
+    final sb = StringBuffer();
+    final spires = [
+      {'name': 'Lower Valley Terminus Tongue', 'dLat': -0.45, 'dLon': 0.30, 'meltEra': ClimateEra.midCentury1950},
+      {'name': 'Glacial Lake Outflow Apron', 'dLat': -0.50, 'dLon': -0.35, 'meltEra': ClimateEra.midCentury1950},
+      {'name': 'Southern Foothill Moraine Spire', 'dLat': -0.38, 'dLon': 0.45, 'meltEra': ClimateEra.midCentury1950},
+      {'name': 'Southwest Valley Glacial Toe', 'dLat': -0.32, 'dLon': -0.48, 'meltEra': ClimateEra.midCentury1950},
+      {'name': 'South Face Ice Apron Spire', 'dLat': -0.22, 'dLon': 0.38, 'meltEra': ClimateEra.lateCentury1980},
+      {'name': 'Western Tributary Glacial Finger', 'dLat': 0.15, 'dLon': -0.46, 'meltEra': ClimateEra.lateCentury1980},
+      {'name': 'Lower Cirque Firn Spire', 'dLat': -0.28, 'dLon': -0.44, 'meltEra': ClimateEra.lateCentury1980},
+      {'name': 'Southeast Cirque Serac Spire', 'dLat': -0.12, 'dLon': 0.28, 'meltEra': ClimateEra.lateCentury1980},
+      {'name': 'Eastern Cirque Glacial Spire', 'dLat': 0.24, 'dLon': 0.40, 'meltEra': ClimateEra.present2026},
+      {'name': 'North Ridge Icefall Spire', 'dLat': 0.36, 'dLon': 0.20, 'meltEra': ClimateEra.present2026},
+      {'name': 'Central Glacial Pass Spire', 'dLat': -0.10, 'dLon': -0.20, 'meltEra': ClimateEra.present2026},
+      {'name': 'Upper Firn Basin Ice Shard', 'dLat': 0.30, 'dLon': -0.24, 'meltEra': ClimateEra.midProjection2060},
+      {'name': 'Northwestern Serac Wall Spire', 'dLat': 0.40, 'dLon': -0.34, 'meltEra': ClimateEra.midProjection2060},
+      {'name': 'Northeast High Ridge Spire', 'dLat': 0.44, 'dLon': 0.10, 'meltEra': ClimateEra.midProjection2060},
+      {'name': 'High Alpine Nunatak Spire', 'dLat': 0.16, 'dLon': 0.12, 'meltEra': ClimateEra.projected2100},
+      {'name': 'Summit Diamond Horn Peak', 'dLat': 0.0, 'dLon': 0.0, 'meltEra': ClimateEra.projected2100},
+    ];
+
+    const baseHeight = 44000.0;
+    const span = 0.105;
+
+    for (final s in spires) {
+      final sLat = region.latitude + (s['dLat'] as double);
+      final sLon = region.longitude + (s['dLon'] as double);
+      final sName = s['name'] as String;
+      final meltEra = s['meltEra'] as ClimateEra;
+      if (era.index <= meltEra.index) {
+        sb.writeln(LG3DVisuals.build3DGlacialSpire(
+          centerLat: sLat,
+          centerLon: sLon,
+          spanDeg: span,
+          heightMeters: baseHeight,
+          face1ColorAbgr: 'cceedd00',
+          face2ColorAbgr: 'ccffffcc',
+          face3ColorAbgr: 'cc00f0ff',
+          face4ColorAbgr: 'ccd0e0ff',
+          wireColorAbgr: 'ffffffff',
+          name: '$sName — Intact Ice Spire',
+          description: 'Glacial Ice Volume (${era.label})',
+        ));
+      }
+    }
+
+    return sb.toString();
+  }
+
+  String _seaLevel3DShape(ClimateRegion region, ClimateEra era, Map<String, String> eraStats) {
+    final sb = StringBuffer();
+
+    if (region.id == 'pacific') {
+      final aquifers = [
+        {'name': 'Outer Fongafale Atoll Lens', 'dLat': -0.45, 'dLon': 0.30, 'dryEra': ClimateEra.midCentury1950},
+        {'name': 'South Nanumea Aquifer Well', 'dLat': -0.50, 'dLon': -0.34, 'dryEra': ClimateEra.midCentury1950},
+        {'name': 'Eastern Tarawa Lagoon Well', 'dLat': -0.36, 'dLon': 0.46, 'dryEra': ClimateEra.midCentury1950},
+        {'name': 'Southwest Coral Cay Lens', 'dLat': -0.30, 'dLon': -0.48, 'dryEra': ClimateEra.midCentury1950},
+        {'name': 'Betio Groundwater Basin', 'dLat': 0.20, 'dLon': -0.38, 'dryEra': ClimateEra.lateCentury1980},
+        {'name': 'Funafuti Northern Aquifer', 'dLat': 0.16, 'dLon': 0.42, 'dryEra': ClimateEra.lateCentury1980},
+        {'name': 'Majuro Western Lens Reserve', 'dLat': 0.35, 'dLon': 0.12, 'dryEra': ClimateEra.lateCentury1980},
+        {'name': 'Southern Atoll Wellfield', 'dLat': -0.18, 'dLon': -0.28, 'dryEra': ClimateEra.lateCentury1980},
+        {'name': 'Central Laura Freshwater Lens', 'dLat': -0.10, 'dLon': -0.30, 'dryEra': ClimateEra.present2026},
+        {'name': 'Bonriki Aquifer Sanctuary', 'dLat': 0.26, 'dLon': 0.22, 'dryEra': ClimateEra.present2026},
+        {'name': 'Kiritimati North Water Well', 'dLat': -0.22, 'dLon': 0.15, 'dryEra': ClimateEra.present2026},
+        {'name': 'Main Island Elevated Water Table', 'dLat': 0.08, 'dLon': 0.14, 'dryEra': ClimateEra.midProjection2060},
+        {'name': 'Abaiang Protected Lens Reserve', 'dLat': 0.28, 'dLon': -0.16, 'dryEra': ClimateEra.midProjection2060},
+        {'name': 'Tuvalu Deep Groundwater Hub', 'dLat': -0.24, 'dLon': 0.05, 'dryEra': ClimateEra.midProjection2060},
+        {'name': 'Inner Causeway Aquifer Pocket', 'dLat': 0.12, 'dLon': -0.06, 'dryEra': ClimateEra.projected2100},
+        {'name': 'Central Fortified Aquifer Vault', 'dLat': 0.0, 'dLon': 0.0, 'dryEra': ClimateEra.projected2100},
+      ];
+
+      const baseHeight = 30000.0;
+      const radius = 0.090;
+
+      for (final a in aquifers) {
+        final aLat = region.latitude + (a['dLat'] as double);
+        final aLon = region.longitude + (a['dLon'] as double);
+        final aName = a['name'] as String;
+        final dryEra = a['dryEra'] as ClimateEra;
+        if (era.index <= dryEra.index) {
+          sb.writeln(LG3DVisuals.build3DHexagonalPrism(
+            centerLat: aLat,
+            centerLon: aLon,
+            radiusDeg: radius,
+            heightMeters: baseHeight,
+            topColorAbgr: 'ee10b981',
+            sideColorAbgr: 'cc00e5ff',
+            wireColorAbgr: 'ff00f0ff',
+            name: '$aName — Freshwater Aquifer Lens',
+            description: 'Potable Freshwater Groundwater Lens (${era.label})',
+          ));
+        }
+      }
+    } else {
+      final tiers = switch (era) {
+        ClimateEra.preindustrial1900 => [3000.0],
+        ClimateEra.midCentury1950    => [4000.0, 8000.0],
+        ClimateEra.lateCentury1980   => [5000.0, 10000.0, 15000.0],
+        ClimateEra.present2026       => [6000.0, 12000.0, 18000.0, 24000.0],
+        ClimateEra.midProjection2060 => [7000.0, 14000.0, 21000.0, 28000.0, 35000.0],
+        ClimateEra.projected2100     => [8000.0, 16000.0, 24000.0, 32000.0, 40000.0, 48000.0],
+      };
+
+      final radius = switch (era) {
+        ClimateEra.preindustrial1900 => 0.18,
+        ClimateEra.midCentury1950    => 0.24,
+        ClimateEra.lateCentury1980   => 0.30,
+        ClimateEra.present2026       => 0.38,
+        ClimateEra.midProjection2060 => 0.46,
+        ClimateEra.projected2100     => 0.55,
+      };
+
+      sb.writeln(LG3DVisuals.build3DSteppedWaterPlanes(
+        centerLat: region.latitude,
+        centerLon: region.longitude,
+        radiusDeg: radius,
+        tierAltitudes: tiers,
+        waterColorAbgr: 'aa0284c7',
+        crestColorAbgr: 'ff38bdf8',
+        name: '3D Sea Level Inundation Slices — ${era.label}',
+        description: 'Progressive Bathymetric Flood Levels (${era.label})',
+      ));
+    }
+
+    return sb.toString();
+  }
+
+  String _forest3DShape(ClimateRegion region, ClimateEra era, Map<String, String> eraStats) {
+    final sb = StringBuffer();
+    final sectors = [
+      {'name': 'Rondônia South Frontier', 'dLat': -0.45, 'dLon': -0.40, 'deathEra': ClimateEra.midCentury1950},
+      {'name': 'Mato Grosso Southern Edge', 'dLat': -0.50, 'dLon': 0.35, 'deathEra': ClimateEra.midCentury1950},
+      {'name': 'Pará Southeastern Timber Belt', 'dLat': -0.38, 'dLon': 0.48, 'deathEra': ClimateEra.midCentury1950},
+      {'name': 'Guaporé Basin Clearing Arc', 'dLat': -0.32, 'dLon': -0.50, 'deathEra': ClimateEra.midCentury1950},
+      {'name': 'BR-163 Highway Logging Arc', 'dLat': -0.22, 'dLon': 0.20, 'deathEra': ClimateEra.lateCentury1980},
+      {'name': 'Eastern Pará Timber Sector', 'dLat': 0.20, 'dLon': 0.44, 'deathEra': ClimateEra.lateCentury1980},
+      {'name': 'Acre Western Agricultural Frontier', 'dLat': -0.26, 'dLon': -0.42, 'deathEra': ClimateEra.lateCentury1980},
+      {'name': 'Purus River Clearance Belt', 'dLat': -0.14, 'dLon': -0.25, 'deathEra': ClimateEra.lateCentury1980},
+      {'name': 'Tapajós River Logging Sector', 'dLat': 0.26, 'dLon': 0.24, 'deathEra': ClimateEra.present2026},
+      {'name': 'Xingu Basin Deforestation Sector', 'dLat': -0.16, 'dLon': 0.36, 'deathEra': ClimateEra.present2026},
+      {'name': 'Madeira River Valley Canopy', 'dLat': 0.06, 'dLon': -0.20, 'deathEra': ClimateEra.present2026},
+      {'name': 'Amapá Coastal Forest Transition', 'dLat': 0.40, 'dLon': 0.30, 'deathEra': ClimateEra.midProjection2060},
+      {'name': 'Roraima Northern Savanna Boundary', 'dLat': 0.44, 'dLon': -0.16, 'deathEra': ClimateEra.midProjection2060},
+      {'name': 'Negro River Rainforest Preserve', 'dLat': 0.24, 'dLon': -0.06, 'deathEra': ClimateEra.midProjection2060},
+      {'name': 'Juruá Deep Wilderness Sector', 'dLat': 0.16, 'dLon': -0.34, 'deathEra': ClimateEra.projected2100},
+      {'name': 'Central Manaus Primary Sanctuary', 'dLat': 0.0, 'dLon': 0.0, 'deathEra': ClimateEra.projected2100},
+    ];
+
+    const baseHeight = 38000.0;
+    const radius = 0.095;
+
+    for (final s in sectors) {
+      final sLat = region.latitude + (s['dLat'] as double);
+      final sLon = region.longitude + (s['dLon'] as double);
+      final sName = s['name'] as String;
+      final deathEra = s['deathEra'] as ClimateEra;
+      if (era.index <= deathEra.index) {
+        sb.writeln(LG3DVisuals.build3DHexagonalPrism(
+          centerLat: sLat,
+          centerLon: sLon,
+          radiusDeg: radius,
+          heightMeters: baseHeight,
+          topColorAbgr: 'ee16a34a',
+          sideColorAbgr: 'cc22c55e',
+          wireColorAbgr: 'ff4ade80',
+          name: '$sName — Intact Canopy Cell',
+          description: 'Living Forest Canopy Structure (${era.label})',
+        ));
+      }
+    }
+
+    return sb.toString();
+  }
+
+  String _aqi3DShape(ClimateRegion region, ClimateEra era, Map<String, String> eraStats) {
+    final sb = StringBuffer();
+
+    final color = switch (era) {
+      ClimateEra.preindustrial1900 => 'aa33cc44',
+      ClimateEra.midCentury1950    => 'aa55ddaa',
+      ClimateEra.lateCentury1980   => 'aafacc15',
+      ClimateEra.present2026       => 'ccf97316',
+      ClimateEra.midProjection2060 => 'dd0000ff',
+      ClimateEra.projected2100     => 'ee990099',
+    };
+
+    final h = switch (era) {
+      ClimateEra.preindustrial1900 => 14000.0,
+      ClimateEra.midCentury1950    => 22000.0,
+      ClimateEra.lateCentury1980   => 30000.0,
+      ClimateEra.present2026       => 40000.0,
+      ClimateEra.midProjection2060 => 50000.0,
+      ClimateEra.projected2100     => 60000.0,
+    };
+
+    final baseRadius = switch (era) {
+      ClimateEra.preindustrial1900 => 0.03,
+      ClimateEra.midCentury1950    => 0.05,
+      ClimateEra.lateCentury1980   => 0.07,
+      ClimateEra.present2026       => 0.09,
+      ClimateEra.midProjection2060 => 0.11,
+      ClimateEra.projected2100     => 0.14,
+    };
+
+    final topRadius = switch (era) {
+      ClimateEra.preindustrial1900 => 0.08,
+      ClimateEra.midCentury1950    => 0.12,
+      ClimateEra.lateCentury1980   => 0.18,
+      ClimateEra.present2026       => 0.24,
+      ClimateEra.midProjection2060 => 0.30,
+      ClimateEra.projected2100     => 0.38,
+    };
+    sb.writeln(LG3DVisuals.build3DInvertedSmogFunnel(
+      centerLat: region.latitude,
+      centerLon: region.longitude,
+      baseRadiusDeg: baseRadius,
+      topRadiusDeg: topRadius,
+      heightMeters: h,
+      funnelColorAbgr: color,
+      topRimColorAbgr: 'ffff8800',
+      name: '3D Atmospheric Inversion Funnel — ${era.label}',
+      description: 'Particulate Accumulation & Smog Column (${era.label})',
+    ));
+
+    return sb.toString();
+  }
 
   /// Returns a KML <TimeSpan> element so Google Earth's timeline slider
   /// toggles visibility of each era's geometry, labels, and data bars.
@@ -2031,160 +1878,9 @@ class LgService {
     ClimateEra.projected2100     => '<TimeSpan><begin>2085-01-01T00:00:00Z</begin><end>2150-12-31T23:59:59Z</end></TimeSpan>',
   };
 
-  /// Returns the primary display metric string for a category/era.
-  String _getCategoryMetric(String category, ClimateEra era, IpccRegionData? regionData) {
-    final year = int.parse(era.label);
-    if (regionData == null) return '';
-    final temp = _interpolateMap(regionData.localTempAnomaly, year);
-    final ice = _interpolateMap(regionData.iceExtentKm2, year);
-    final sea = _interpolateMap(regionData.seaLevelMm, year);
-    final forest = _interpolateMap(regionData.forestCoverPct, year);
-    final aqi = _interpolateMap(regionData.aqiIndex, year);
 
-    return switch (category) {
-      'glacier'  => '${(ice / 1000000.0).toStringAsFixed(1)}M km\u00B2',
-      'sealevel' => '${sea.toStringAsFixed(0)} mm rise',
-      'forest'   => '${forest.toStringAsFixed(1)}% cover',
-      'heat'     => '+${temp.toStringAsFixed(1)}\u00B0C',
-      'aqi'      => 'AQI ${aqi.toStringAsFixed(0)}',
-      _          => '',
-    };
-  }
 
-  /// Builds an always-visible data label Placemark showing the key metric
-  /// for a given era, positioned near the region with era-based offsets
-  /// so labels from different eras don't overlap.
-  String _buildDataLabel(ClimateRegion region, ClimateEra era,
-      Map<String, String> eraStats, IpccRegionData? regionData) {
-    final metric = _getCategoryMetric(region.category, era, regionData);
-    final color = _kmlColorAbgr('ff', _severityColorRgb(era));
 
-    // Fan out labels so all 6 eras are readable simultaneously
-    final (latOff, lonOff) = switch (era) {
-      ClimateEra.preindustrial1900 => (-0.30, -0.40),
-      ClimateEra.midCentury1950    => (-0.15, -0.20),
-      ClimateEra.lateCentury1980   => (0.00,  -0.40),
-      ClimateEra.present2026       => (0.00,   0.45),
-      ClimateEra.midProjection2060 => (0.15,   0.25),
-      ClimateEra.projected2100     => (0.30,  -0.35),
-    };
-
-    final labelLat = region.latitude + latOff;
-    final labelLon = region.longitude + lonOff;
-    final blurb = _severityBlurb(region.category, era, eraStats);
-
-    return '''
-    <Placemark>
-      <name>${LG3DVisuals.escapeXmlText(era.label)}: $metric</name>
-      <visibility>1</visibility>
-      <description><![CDATA[$blurb]]></description>
-      <Style>
-        <IconStyle>
-          <scale>0.7</scale>
-          <Icon><href>http://maps.google.com/mapfiles/kml/shapes/info_circle.png</href></Icon>
-          <color>$color</color>
-        </IconStyle>
-        <LabelStyle>
-          <color>$color</color>
-          <scale>1.4</scale>
-        </LabelStyle>
-      </Style>
-      <Point>
-        <coordinates>$labelLon,$labelLat,0</coordinates>
-      </Point>
-    </Placemark>''';
-  }
-
-  /// Builds a 3D extruded column (data bar) whose height represents the
-  /// severity of the metric for this era — creating a 3D bar chart on
-  /// the globe surface visible from the LG rig's tilted camera.
-  String _buildDataBar(ClimateRegion region, ClimateEra era,
-      Map<String, String> eraStats, IpccRegionData? regionData) {
-    final year = int.parse(era.label);
-
-    // Height proportional to metric severity (meters above ground)
-    final height = switch (region.category) {
-      'heat'     => (regionData?.localTempAnomaly[year] ?? 0.0) * 10000.0,
-      'glacier'  => (1.0 - (regionData?.iceExtentKm2[year] ?? 12500000) / 12500000.0) * 50000.0,
-      'sealevel' => (regionData?.seaLevelMm[year] ?? 0).toDouble() * 50.0,
-      'forest'   => (100.0 - (regionData?.forestCoverPct[year] ?? 100)) / 100.0 * 50000.0,
-      'aqi'      => (regionData?.aqiIndex[year] ?? 0) * 100.0,
-      _          => 10000.0,
-    };
-
-    if (height < 500) return ''; // Too small to render visibly
-
-    final fillColor = _kmlColorAbgr('cc', _severityColorRgb(era));
-    final edgeColor = _kmlColorAbgr('ff', _severityColorRgb(era));
-    final metric = _getCategoryMetric(region.category, era, regionData);
-
-    // Place bars side by side so all 6 eras are visible together
-    final lonOff = switch (era) {
-      ClimateEra.preindustrial1900 => -0.25,
-      ClimateEra.midCentury1950    => -0.15,
-      ClimateEra.lateCentury1980   => -0.05,
-      ClimateEra.present2026       =>  0.05,
-      ClimateEra.midProjection2060 =>  0.15,
-      ClimateEra.projected2100     =>  0.25,
-    };
-
-    final barLat = region.latitude - 0.4;
-    final barLon = region.longitude + lonOff;
-    const halfSpan = 0.04;
-    final h = height.toStringAsFixed(0);
-
-    final sw = '${barLon - halfSpan},${barLat - halfSpan},$h';
-    final se = '${barLon + halfSpan},${barLat - halfSpan},$h';
-    final ne = '${barLon + halfSpan},${barLat + halfSpan},$h';
-    final nw = '${barLon - halfSpan},${barLat + halfSpan},$h';
-
-    return '''
-    <Placemark>
-      <name>${LG3DVisuals.escapeXmlText(era.label)} \u2014 $metric</name>
-      <visibility>1</visibility>
-      <description><![CDATA[<b>${era.label}</b>: $metric<br/>${_severityBlurb(region.category, era, eraStats)}]]></description>
-      <Style>
-        <PolyStyle>
-          <color>$fillColor</color>
-          <outline>1</outline>
-        </PolyStyle>
-        <LineStyle>
-          <color>$edgeColor</color>
-          <width>1.5</width>
-        </LineStyle>
-      </Style>
-      <Polygon>
-        <extrude>1</extrude>
-        <tessellate>1</tessellate>
-        <altitudeMode>relativeToGround</altitudeMode>
-        <outerBoundaryIs>
-          <LinearRing>
-            <coordinates>$sw $se $ne $nw $sw</coordinates>
-          </LinearRing>
-        </outerBoundaryIs>
-      </Polygon>
-    </Placemark>
-    <!-- Floating 3D Value Banner above Column -->
-    <Placemark>
-      <name>${LG3DVisuals.escapeXmlText(era.label)}: $metric</name>
-      <visibility>1</visibility>
-      <Style>
-        <IconStyle>
-          <scale>0.6</scale>
-          <Icon><href>http://maps.google.com/mapfiles/kml/shapes/donut.png</href></Icon>
-          <color>$edgeColor</color>
-        </IconStyle>
-        <LabelStyle>
-          <color>$edgeColor</color>
-          <scale>1.2</scale>
-        </LabelStyle>
-      </Style>
-      <Point>
-        <altitudeMode>relativeToGround</altitudeMode>
-        <coordinates>$barLon,$barLat,$h</coordinates>
-      </Point>
-    </Placemark>''';
-  }
 
   String _buildNetworkLinkKml(String href) =>
       '<?xml version="1.0" encoding="UTF-8"?>'
@@ -2224,16 +1920,12 @@ class LgService {
     sb.writeln('Rig IP: ${_state.ipAddress}:${_state.port}');
     sb.writeln('Screen Count: ${_state.screenCount}');
     sb.writeln('');
-
-    // 1. Check disk space and basic system info
     try {
       final uname = await execute('uname -a');
       sb.writeln('🐧 OS Info: ${uname.trim()}');
     } catch (e) {
       sb.writeln('🐧 OS Info Check Failed: $e');
     }
-
-    // 2. Check Web Server (Apache/Nginx) status
     sb.writeln('\n--- Web Server Check ---');
     try {
       final ports = await execute('sudo netstat -tlnp 2>/dev/null | grep -E "apache|nginx|lighttpd" || ss -tlnp 2>/dev/null | grep -E "80|81" || netstat -tln 2>/dev/null | grep -E "80|81"');
@@ -2255,8 +1947,6 @@ class LgService {
     } catch (e) {
       sb.writeln('Local Port 81 Check Failed: $e');
     }
-
-    // 3. Check KML Directory existence and permissions
     sb.writeln('\n--- KML Directory & Permissions ---');
     try {
       final lsKml = await execute('ls -la $_kmlDir');
@@ -2271,8 +1961,6 @@ class LgService {
     } catch (e) {
       sb.writeln('Failed to list /var/www/html: $e');
     }
-
-    // 4. Check Apache Access Logs
     sb.writeln('\n--- Apache Access Logs (Last 15 lines) ---');
     try {
       final logs = await execute('sudo tail -n 15 /var/log/apache2/access.log || sudo tail -n 15 /var/log/nginx/access.log || tail -n 15 /var/log/httpd/access_log');
@@ -2287,13 +1975,10 @@ class LgService {
         'ps aux | grep -i earth; echo ---; who; echo ---; echo DISPLAY=\$DISPLAY'
       );
       sb.writeln(extra.trim().isEmpty ? 'No processes found.' : extra.trim());
-      // ignore: avoid_print
       print(extra);
     } catch (e) {
       sb.writeln('Failed to execute process check: $e');
     }
-
-    // 5. Check Google Earth places.kml for NetworkLink
     sb.writeln('\n--- Google Earth Configuration Check ---');
     try {
       final gePlaces = await execute('cat /home/lg/.googleearth/MyPlaces.kml 2>/dev/null || cat /home/lg/.local/share/Google/GoogleEarth/myplaces.kml 2>/dev/null');
@@ -2317,16 +2002,12 @@ class LgService {
 
     final results = <String, String>{};
     final port = _state.webPort;
-
-    // 1. Check if the kml directory exists and has files
     try {
       final ls = await execute('ls -la $_kmlDir/ 2>&1');
       results['1_kml_dir'] = ls.trim().isEmpty ? '❌ EMPTY' : '✅ Files exist:\n$ls';
     } catch (e) {
       results['1_kml_dir'] = '❌ ERROR: $e';
     }
-
-    // 2. Check if kmls.txt exists and has content
     try {
       final content = await execute('cat $_kmlSyncFile 2>&1 | head -c 500');
       if (content.contains('<?xml') || content.contains('<kml')) {
@@ -2339,8 +2020,6 @@ class LgService {
     } catch (e) {
       results['2_kmls_txt'] = '❌ ERROR reading: $e';
     }
-
-    // 3. Check if web server is serving kmls.txt
     try {
       final curlResult = await execute('curl -s -w "\\nHTTP_CODE:%{http_code}" http://localhost:$port/kmls.txt 2>&1 | tail -5');
       if (curlResult.contains('HTTP_CODE:200')) {
@@ -2355,8 +2034,6 @@ class LgService {
     } catch (e) {
       results['3_web_server'] = '❌ curl failed: $e';
     }
-
-    // 4. Check Google Earth MyPlaces.kml for NetworkLink
     try {
       final places = await execute(
         'cat /home/lg/.googleearth/myplaces.kml 2>/dev/null || '
@@ -2377,8 +2054,6 @@ class LgService {
     } catch (e) {
       results['4_myplaces'] = '❌ ERROR: $e';
     }
-
-    // 5. Check if Google Earth is running
     try {
       final ps = await execute('ps -eo user,pid,cmd | grep -E "google-earth|googleearth-bin" | grep -v grep || echo "NOT_RUNNING"');
       final whoami = await execute('whoami');
@@ -2391,8 +2066,6 @@ class LgService {
     } catch (e) {
       results['5_ge_running'] = '⚠️ Check failed: $e';
     }
-
-    // 6. Test direct KML fetch that GE would do
     try {
       final fetch = await execute('curl -s http://localhost:$port/kmls.txt 2>&1 | head -c 200');
       results['6_ge_would_see'] = 'What GE polls every 2s:\n$fetch';
@@ -2423,18 +2096,671 @@ class LgService {
 
 
 class LG3DVisuals {
-  // Any free-text string (name, description) embedded directly into KML
-  // (i.e. NOT wrapped in <![CDATA[ ]]>) must have XML special characters
-  // escaped. A raw "&" — e.g. in "... Mesh & Hotspot Spikes" — breaks
-  // parsing of the ENTIRE document, not just that one <name> tag, which is
-  // why a single unescaped "&" in a Folder/Placemark name can make the
-  // whole KML fail to render on the rig.
   static String escapeXmlText(String s) => s
       .replaceAll('&', '&amp;')
       .replaceAll('<', '&lt;')
       .replaceAll('>', '&gt;');
 
   LG3DVisuals._();
+
+  /// Builds a multi-tiered 3D cylindrical tower with illuminated top cap,
+  /// translucent side wall facets, and horizontal glowing wireframe rings
+  /// (styled directly after Liquid Galaxy multi-tier cylindrical biomes).
+  static String build3DCylinderTower({
+    required double centerLat,
+    required double centerLon,
+    required double radiusDeg,
+    required double heightMeters,
+    int segments = 16,
+    int tiers = 4,
+    required String baseColorAbgr,
+    required String topColorAbgr,
+    required String wireColorAbgr,
+    String name = '3D Cylindrical Tower',
+    String description = '',
+  }) {
+    final sb = StringBuffer();
+    sb.writeln('<Folder>');
+    sb.writeln('  <name>${escapeXmlText(name)}</name>');
+    sb.writeln('  <visibility>1</visibility>');
+    sb.writeln('  <open>0</open>');
+    if (description.isNotEmpty) {
+      sb.writeln('  <description><![CDATA[$description]]></description>');
+    }
+
+    final tierHeight = heightMeters / tiers;
+    final tierPoints = <List<String>>[];
+    for (int t = 0; t <= tiers; t++) {
+      final h = (t * tierHeight).toStringAsFixed(1);
+      final ring = <String>[];
+      for (int i = 0; i < segments; i++) {
+        final angle = i * (math.pi * 2) / segments;
+        final lat = centerLat + radiusDeg * math.sin(angle);
+        final lon = centerLon + radiusDeg * math.cos(angle) / math.cos(centerLat * math.pi / 180);
+        ring.add('${lon.toStringAsFixed(6)},${lat.toStringAsFixed(6)},$h');
+      }
+      tierPoints.add(ring);
+    }
+    for (int t = 0; t < tiers; t++) {
+      final bottomRing = tierPoints[t];
+      final topRing = tierPoints[t + 1];
+      final tierColor = t == tiers - 1 ? topColorAbgr : baseColorAbgr;
+
+      for (int i = 0; i < segments; i++) {
+        final next = (i + 1) % segments;
+        sb.writeln('''
+      <Placemark>
+        <name>Tower Tier ${t + 1} - Facet ${i + 1}</name>
+        <Style>
+          <PolyStyle><color>$tierColor</color><outline>1</outline></PolyStyle>
+          <LineStyle><color>$wireColorAbgr</color><width>2.0</width></LineStyle>
+        </Style>
+        <Polygon>
+          <tessellate>0</tessellate>
+          <altitudeMode>relativeToGround</altitudeMode>
+          <outerBoundaryIs><LinearRing><coordinates>
+            ${bottomRing[i]}
+            ${bottomRing[next]}
+            ${topRing[next]}
+            ${topRing[i]}
+            ${bottomRing[i]}
+          </coordinates></LinearRing></outerBoundaryIs>
+        </Polygon>
+      </Placemark>''');
+      }
+      final ringCoordinates = '${topRing.join(' ')} ${topRing[0]}';
+      sb.writeln('''
+      <Placemark>
+        <name>Tier ${t + 1} Level Ring</name>
+        <Style>
+          <LineStyle><color>$wireColorAbgr</color><width>3.0</width></LineStyle>
+        </Style>
+        <LineString>
+          <tessellate>0</tessellate>
+          <altitudeMode>relativeToGround</altitudeMode>
+          <coordinates>$ringCoordinates</coordinates>
+        </LineString>
+      </Placemark>''');
+    }
+    final topRing = tierPoints.last;
+    final topCoordinates = '${topRing.join(' ')} ${topRing[0]}';
+    sb.writeln('''
+    <Placemark>
+      <name>Tower Top Cap</name>
+      <Style>
+        <PolyStyle><color>$topColorAbgr</color><outline>1</outline></PolyStyle>
+        <LineStyle><color>$wireColorAbgr</color><width>2.5</width></LineStyle>
+      </Style>
+      <Polygon>
+        <tessellate>0</tessellate>
+        <altitudeMode>relativeToGround</altitudeMode>
+        <outerBoundaryIs><LinearRing><coordinates>$topCoordinates</coordinates></LinearRing></outerBoundaryIs>
+      </Polygon>
+    </Placemark>''');
+
+    sb.writeln('</Folder>');
+    return sb.toString();
+  }
+
+  /// Builds a multi-faceted 3D crystalline / glacial pyramid with directional sunlight face shading.
+  static String build3DGlacialSpire({
+    required double centerLat,
+    required double centerLon,
+    required double spanDeg,
+    required double heightMeters,
+    required String face1ColorAbgr,
+    required String face2ColorAbgr,
+    required String face3ColorAbgr,
+    required String face4ColorAbgr,
+    String wireColorAbgr = 'ffffffff',
+    String name = '3D Glacial Spire',
+    String description = '',
+  }) {
+    final half = spanDeg / 2;
+    final sw = '${(centerLon - half).toStringAsFixed(6)},${(centerLat - half).toStringAsFixed(6)},0';
+    final se = '${(centerLon + half).toStringAsFixed(6)},${(centerLat - half).toStringAsFixed(6)},0';
+    final ne = '${(centerLon + half).toStringAsFixed(6)},${(centerLat + half).toStringAsFixed(6)},0';
+    final nw = '${(centerLon - half).toStringAsFixed(6)},${(centerLat + half).toStringAsFixed(6)},0';
+
+    final h = heightMeters.toStringAsFixed(1);
+    final peak = '${centerLon.toStringAsFixed(6)},${centerLat.toStringAsFixed(6)},$h';
+
+    return '''
+    <Folder>
+      <name>${escapeXmlText(name)}</name>
+      <visibility>1</visibility>
+      <open>0</open>
+      ${description.isNotEmpty ? '<description><![CDATA[$description]]></description>' : ''}
+
+      <!-- South Face -->
+      <Placemark>
+        <name>Glacial Peak South Face</name>
+        <Style>
+          <PolyStyle><color>$face1ColorAbgr</color><outline>1</outline></PolyStyle>
+          <LineStyle><color>$wireColorAbgr</color><width>2.5</width></LineStyle>
+        </Style>
+        <Polygon>
+          <tessellate>0</tessellate>
+          <altitudeMode>relativeToGround</altitudeMode>
+          <outerBoundaryIs><LinearRing><coordinates>
+            $sw $se $peak $sw
+          </coordinates></LinearRing></outerBoundaryIs>
+        </Polygon>
+      </Placemark>
+
+      <!-- East Face -->
+      <Placemark>
+        <name>Glacial Peak East Face</name>
+        <Style>
+          <PolyStyle><color>$face2ColorAbgr</color><outline>1</outline></PolyStyle>
+          <LineStyle><color>$wireColorAbgr</color><width>2.5</width></LineStyle>
+        </Style>
+        <Polygon>
+          <tessellate>0</tessellate>
+          <altitudeMode>relativeToGround</altitudeMode>
+          <outerBoundaryIs><LinearRing><coordinates>
+            $se $ne $peak $se
+          </coordinates></LinearRing></outerBoundaryIs>
+        </Polygon>
+      </Placemark>
+
+      <!-- North Face -->
+      <Placemark>
+        <name>Glacial Peak North Face</name>
+        <Style>
+          <PolyStyle><color>$face3ColorAbgr</color><outline>1</outline></PolyStyle>
+          <LineStyle><color>$wireColorAbgr</color><width>2.5</width></LineStyle>
+        </Style>
+        <Polygon>
+          <tessellate>0</tessellate>
+          <altitudeMode>relativeToGround</altitudeMode>
+          <outerBoundaryIs><LinearRing><coordinates>
+            $ne $nw $peak $ne
+          </coordinates></LinearRing></outerBoundaryIs>
+        </Polygon>
+      </Placemark>
+
+      <!-- West Face -->
+      <Placemark>
+        <name>Glacial Peak West Face</name>
+        <Style>
+          <PolyStyle><color>$face4ColorAbgr</color><outline>1</outline></PolyStyle>
+          <LineStyle><color>$wireColorAbgr</color><width>2.5</width></LineStyle>
+        </Style>
+        <Polygon>
+          <tessellate>0</tessellate>
+          <altitudeMode>relativeToGround</altitudeMode>
+          <outerBoundaryIs><LinearRing><coordinates>
+            $nw $sw $peak $nw
+          </coordinates></LinearRing></outerBoundaryIs>
+        </Polygon>
+      </Placemark>
+    </Folder>''';
+  }
+
+  /// Builds a multi-faceted 3D geodesic thermal dome / cone with expanding radiation tiers.
+  static String build3DGeodesicDome({
+    required double centerLat,
+    required double centerLon,
+    required double radiusDeg,
+    required double heightMeters,
+    int segments = 12,
+    required List<String> faceColorsAbgr,
+    String wireColorAbgr = 'ffffaa00',
+    String name = '3D Thermal Dome',
+    String description = '',
+  }) {
+    final pointsG = <String>[];
+    final h = heightMeters.toStringAsFixed(1);
+    final peak = '${centerLon.toStringAsFixed(6)},${centerLat.toStringAsFixed(6)},$h';
+
+    for (int i = 0; i < segments; i++) {
+      final angle = i * (math.pi * 2) / segments;
+      final lat = centerLat + radiusDeg * math.sin(angle);
+      final lon = centerLon + radiusDeg * math.cos(angle) / math.cos(centerLat * math.pi / 180);
+      pointsG.add('${lon.toStringAsFixed(6)},${lat.toStringAsFixed(6)},0');
+    }
+
+    final sb = StringBuffer();
+    sb.writeln('<Folder>');
+    sb.writeln('  <name>${escapeXmlText(name)}</name>');
+    sb.writeln('  <visibility>1</visibility>');
+    sb.writeln('  <open>0</open>');
+    if (description.isNotEmpty) {
+      sb.writeln('  <description><![CDATA[$description]]></description>');
+    }
+
+    for (int i = 0; i < segments; i++) {
+      final next = (i + 1) % segments;
+      final color = faceColorsAbgr[i % faceColorsAbgr.length];
+      sb.writeln('''
+      <Placemark>
+        <name>Dome Panel ${i + 1}</name>
+        <Style>
+          <PolyStyle><color>$color</color><outline>1</outline></PolyStyle>
+          <LineStyle><color>$wireColorAbgr</color><width>2.5</width></LineStyle>
+        </Style>
+        <Polygon>
+          <tessellate>0</tessellate>
+          <altitudeMode>relativeToGround</altitudeMode>
+          <outerBoundaryIs><LinearRing><coordinates>
+            ${pointsG[i]}
+            ${pointsG[next]}
+            $peak
+            ${pointsG[i]}
+          </coordinates></LinearRing></outerBoundaryIs>
+        </Polygon>
+      </Placemark>''');
+    }
+
+    sb.writeln('</Folder>');
+    return sb.toString();
+  }
+
+  /// 1. Builds a true 6-sided 3D Hexagonal Prism (Rainforest Canopy Cell).
+  static String build3DHexagonalPrism({
+    required double centerLat,
+    required double centerLon,
+    required double radiusDeg,
+    required double heightMeters,
+    required String topColorAbgr,
+    required String sideColorAbgr,
+    required String wireColorAbgr,
+    String name = '3D Hexagonal Canopy Prism',
+    String description = '',
+  }) {
+    final sb = StringBuffer();
+    sb.writeln('<Folder>');
+    sb.writeln('  <name>${escapeXmlText(name)}</name>');
+    sb.writeln('  <visibility>1</visibility>');
+    sb.writeln('  <open>0</open>');
+    if (description.isNotEmpty) {
+      sb.writeln('  <description><![CDATA[$description]]></description>');
+    }
+
+    final h = heightMeters.toStringAsFixed(1);
+    final bottomPoints = <String>[];
+    final topPoints = <String>[];
+    const sides = 6;
+
+    for (int i = 0; i < sides; i++) {
+      final angle = i * (math.pi / 3);
+      final lat = centerLat + radiusDeg * math.sin(angle);
+      final lon = centerLon + radiusDeg * math.cos(angle) / math.cos(centerLat * math.pi / 180);
+      bottomPoints.add('${lon.toStringAsFixed(6)},${lat.toStringAsFixed(6)},0');
+      topPoints.add('${lon.toStringAsFixed(6)},${lat.toStringAsFixed(6)},$h');
+    }
+    for (int i = 0; i < sides; i++) {
+      final next = (i + 1) % sides;
+      sb.writeln('''
+      <Placemark>
+        <name>Hex Facet ${i + 1}</name>
+        <Style>
+          <PolyStyle><color>$sideColorAbgr</color><outline>1</outline></PolyStyle>
+          <LineStyle><color>$wireColorAbgr</color><width>2.0</width></LineStyle>
+        </Style>
+        <Polygon>
+          <tessellate>0</tessellate>
+          <altitudeMode>relativeToGround</altitudeMode>
+          <outerBoundaryIs><LinearRing><coordinates>
+            ${bottomPoints[i]}
+            ${bottomPoints[next]}
+            ${topPoints[next]}
+            ${topPoints[i]}
+            ${bottomPoints[i]}
+          </coordinates></LinearRing></outerBoundaryIs>
+        </Polygon>
+      </Placemark>''');
+    }
+    final topCoords = '${topPoints.join(' ')} ${topPoints[0]}';
+    sb.writeln('''
+    <Placemark>
+      <name>Hexagonal Canopy Roof</name>
+      <Style>
+        <PolyStyle><color>$topColorAbgr</color><outline>1</outline></PolyStyle>
+        <LineStyle><color>$wireColorAbgr</color><width>3.0</width></LineStyle>
+      </Style>
+      <Polygon>
+        <tessellate>0</tessellate>
+        <altitudeMode>relativeToGround</altitudeMode>
+        <outerBoundaryIs><LinearRing><coordinates>$topCoords</coordinates></LinearRing></outerBoundaryIs>
+      </Polygon>
+    </Placemark>''');
+
+    sb.writeln('</Folder>');
+    return sb.toString();
+  }
+
+  /// 2. Builds multi-level horizontal stepped water planes / bathymetric flood slabs (NO cylinders!).
+  static String build3DSteppedWaterPlanes({
+    required double centerLat,
+    required double centerLon,
+    required double radiusDeg,
+    required List<double> tierAltitudes,
+    required String waterColorAbgr,
+    required String crestColorAbgr,
+    String name = '3D Stepped Water Inundation Slices',
+    String description = '',
+  }) {
+    final sb = StringBuffer();
+    sb.writeln('<Folder>');
+    sb.writeln('  <name>${escapeXmlText(name)}</name>');
+    sb.writeln('  <visibility>1</visibility>');
+    sb.writeln('  <open>0</open>');
+    if (description.isNotEmpty) {
+      sb.writeln('  <description><![CDATA[$description]]></description>');
+    }
+
+    const segments = 24;
+    for (int t = 0; t < tierAltitudes.length; t++) {
+      final alt = tierAltitudes[t];
+      final r = radiusDeg * (1.0 + t * 0.25);
+      final altStr = alt.toStringAsFixed(1);
+      final ring = <String>[];
+
+      for (int i = 0; i < segments; i++) {
+        final angle = i * (math.pi * 2) / segments;
+        final lat = centerLat + r * math.sin(angle);
+        final lon = centerLon + r * math.cos(angle) / math.cos(centerLat * math.pi / 180);
+        ring.add('${lon.toStringAsFixed(6)},${lat.toStringAsFixed(6)},$altStr');
+      }
+      final planeCoords = '${ring.join(' ')} ${ring[0]}';
+
+      sb.writeln('''
+      <Placemark>
+        <name>Inundation Surge Slab ${t + 1} (+${(alt / 1000).toStringAsFixed(1)}km surge)</name>
+        <Style>
+          <PolyStyle><color>$waterColorAbgr</color><outline>1</outline></PolyStyle>
+          <LineStyle><color>$crestColorAbgr</color><width>3.0</width></LineStyle>
+        </Style>
+        <Polygon>
+          <tessellate>0</tessellate>
+          <altitudeMode>relativeToGround</altitudeMode>
+          <outerBoundaryIs><LinearRing><coordinates>$planeCoords</coordinates></LinearRing></outerBoundaryIs>
+        </Polygon>
+      </Placemark>''');
+    }
+
+    sb.writeln('</Folder>');
+    return sb.toString();
+  }
+
+  /// 3. Builds an inverted 3D Smog Funnel / Tornado (narrow at base, flared at ceiling).
+  static String build3DInvertedSmogFunnel({
+    required double centerLat,
+    required double centerLon,
+    required double baseRadiusDeg,
+    required double topRadiusDeg,
+    required double heightMeters,
+    required String funnelColorAbgr,
+    required String topRimColorAbgr,
+    int segments = 12,
+    String name = '3D Atmospheric Smog Funnel',
+    String description = '',
+  }) {
+    final sb = StringBuffer();
+    sb.writeln('<Folder>');
+    sb.writeln('  <name>${escapeXmlText(name)}</name>');
+    sb.writeln('  <visibility>1</visibility>');
+    sb.writeln('  <open>0</open>');
+    if (description.isNotEmpty) {
+      sb.writeln('  <description><![CDATA[$description]]></description>');
+    }
+
+    final h = heightMeters.toStringAsFixed(1);
+    final basePoints = <String>[];
+    final topPoints = <String>[];
+
+    for (int i = 0; i < segments; i++) {
+      final angle = i * (math.pi * 2) / segments;
+      final bLat = centerLat + baseRadiusDeg * math.sin(angle);
+      final bLon = centerLon + baseRadiusDeg * math.cos(angle) / math.cos(centerLat * math.pi / 180);
+      final tLat = centerLat + topRadiusDeg * math.sin(angle);
+      final tLon = centerLon + topRadiusDeg * math.cos(angle) / math.cos(centerLat * math.pi / 180);
+      basePoints.add('${bLon.toStringAsFixed(6)},${bLat.toStringAsFixed(6)},0');
+      topPoints.add('${tLon.toStringAsFixed(6)},${tLat.toStringAsFixed(6)},$h');
+    }
+    for (int i = 0; i < segments; i++) {
+      final next = (i + 1) % segments;
+      sb.writeln('''
+      <Placemark>
+        <name>Smog Funnel Wall ${i + 1}</name>
+        <Style>
+          <PolyStyle><color>$funnelColorAbgr</color><outline>1</outline></PolyStyle>
+          <LineStyle><color>$topRimColorAbgr</color><width>1.5</width></LineStyle>
+        </Style>
+        <Polygon>
+          <tessellate>0</tessellate>
+          <altitudeMode>relativeToGround</altitudeMode>
+          <outerBoundaryIs><LinearRing><coordinates>
+            ${basePoints[i]}
+            ${basePoints[next]}
+            ${topPoints[next]}
+            ${topPoints[i]}
+            ${basePoints[i]}
+          </coordinates></LinearRing></outerBoundaryIs>
+        </Polygon>
+      </Placemark>''');
+    }
+    final topCoords = '${topPoints.join(' ')} ${topPoints[0]}';
+    sb.writeln('''
+    <Placemark>
+      <name>Thermal Inversion Ceiling</name>
+      <Style>
+        <PolyStyle><color>$funnelColorAbgr</color><outline>1</outline></PolyStyle>
+        <LineStyle><color>$topRimColorAbgr</color><width>3.0</width></LineStyle>
+      </Style>
+      <Polygon>
+        <tessellate>0</tessellate>
+        <altitudeMode>relativeToGround</altitudeMode>
+        <outerBoundaryIs><LinearRing><coordinates>$topCoords</coordinates></LinearRing></outerBoundaryIs>
+      </Polygon>
+    </Placemark>''');
+
+    sb.writeln('</Folder>');
+    return sb.toString();
+  }
+
+  /// Builds a stepped 3D marine inundation slice collection (replaces round cylinders).
+  static String build3DMarineSubmergenceColumn({
+    required double centerLat,
+    required double centerLon,
+    required double radiusDeg,
+    required double heightMeters,
+    int tiers = 3,
+    required String waterColorAbgr,
+    required String crestColorAbgr,
+    String name = '3D Marine Inundation Slices',
+    String description = '',
+  }) {
+    final altitudes = <double>[];
+    for (int t = 1; t <= tiers; t++) {
+      altitudes.add(heightMeters * (t / tiers));
+    }
+    return build3DSteppedWaterPlanes(
+      centerLat: centerLat,
+      centerLon: centerLon,
+      radiusDeg: radiusDeg,
+      tierAltitudes: altitudes,
+      waterColorAbgr: waterColorAbgr,
+      crestColorAbgr: crestColorAbgr,
+      name: name,
+      description: description,
+    );
+  }
+
+  /// Builds an inverted 3D AQI smog funnel / tornado (replaces straight round cylinders).
+  static String build3DAqiSmogPillar({
+    required double centerLat,
+    required double centerLon,
+    required double radiusDeg,
+    required double heightMeters,
+    required double pm25,
+    required String severityColorAbgr,
+    String name = '3D AQI Smog Funnel',
+    String description = '',
+  }) {
+    return build3DInvertedSmogFunnel(
+      centerLat: centerLat,
+      centerLon: centerLon,
+      baseRadiusDeg: radiusDeg * 0.35,
+      topRadiusDeg: radiusDeg * 1.3,
+      heightMeters: heightMeters,
+      funnelColorAbgr: severityColorAbgr,
+      topRimColorAbgr: 'ffff8800',
+      name: name,
+      description: description,
+    );
+  }
+
+  /// Builds an elevated 3D sensor beacon spire for localized sub-stations.
+  static String build3DSensorBeacon({
+    required double centerLat,
+    required double centerLon,
+    required double radiusDeg,
+    required double heightMeters,
+    required String beaconColorAbgr,
+    String name = '3D Sensor Beacon',
+    String description = '',
+  }) {
+    final h = heightMeters.toStringAsFixed(1);
+    final halfH = (heightMeters * 0.55).toStringAsFixed(1);
+    final topPeak = '${centerLon.toStringAsFixed(6)},${centerLat.toStringAsFixed(6)},$h';
+    final groundBase = '${centerLon.toStringAsFixed(6)},${centerLat.toStringAsFixed(6)},0';
+
+    final ringPoints = <String>[];
+    const segments = 6;
+    for (int i = 0; i < segments; i++) {
+      final angle = i * (math.pi * 2) / segments;
+      final lat = centerLat + radiusDeg * math.sin(angle);
+      final lon = centerLon + radiusDeg * math.cos(angle) / math.cos(centerLat * math.pi / 180);
+      ringPoints.add('${lon.toStringAsFixed(6)},${lat.toStringAsFixed(6)},$halfH');
+    }
+
+    final sb = StringBuffer();
+    sb.writeln('<Folder>');
+    sb.writeln('  <name>${escapeXmlText(name)}</name>');
+    sb.writeln('  <visibility>1</visibility>');
+    sb.writeln('  <open>0</open>');
+    if (description.isNotEmpty) {
+      sb.writeln('  <description><![CDATA[$description]]></description>');
+    }
+    for (int i = 0; i < segments; i++) {
+      final next = (i + 1) % segments;
+      sb.writeln('''
+      <Placemark>
+        <name>Beacon Diamond Upper ${i + 1}</name>
+        <Style>
+          <PolyStyle><color>$beaconColorAbgr</color><outline>1</outline></PolyStyle>
+          <LineStyle><color>ffffffff</color><width>1.8</width></LineStyle>
+        </Style>
+        <Polygon>
+          <tessellate>0</tessellate>
+          <altitudeMode>relativeToGround</altitudeMode>
+          <outerBoundaryIs><LinearRing><coordinates>
+            ${ringPoints[i]}
+            ${ringPoints[next]}
+            $topPeak
+            ${ringPoints[i]}
+          </coordinates></LinearRing></outerBoundaryIs>
+        </Polygon>
+      </Placemark>''');
+      sb.writeln('''
+      <Placemark>
+        <name>Beacon Diamond Lower ${i + 1}</name>
+        <Style>
+          <PolyStyle><color>$beaconColorAbgr</color><outline>1</outline></PolyStyle>
+          <LineStyle><color>ffffffff</color><width>1.8</width></LineStyle>
+        </Style>
+        <Polygon>
+          <tessellate>0</tessellate>
+          <altitudeMode>relativeToGround</altitudeMode>
+          <outerBoundaryIs><LinearRing><coordinates>
+            $groundBase
+            ${ringPoints[next]}
+            ${ringPoints[i]}
+            $groundBase
+          </coordinates></LinearRing></outerBoundaryIs>
+        </Polygon>
+      </Placemark>''');
+    }
+
+    sb.writeln('</Folder>');
+    return sb.toString();
+  }
+
+  /// Builds an elevated 3D connecting data telemetry / flight / migration corridor.
+  static String build3DConnectingCorridor({
+    required double fromLat,
+    required double fromLon,
+    required double toLat,
+    required double toLon,
+    required double altitudeMeters,
+    required String lineColorAbgr,
+    double lineWidth = 3.5,
+    String name = '3D Data Corridor',
+    String description = '',
+  }) {
+    final altStr = altitudeMeters.toStringAsFixed(1);
+    final coords = '${fromLon.toStringAsFixed(6)},${fromLat.toStringAsFixed(6)},$altStr ${toLon.toStringAsFixed(6)},${toLat.toStringAsFixed(6)},$altStr';
+
+    return '''
+    <Placemark>
+      <name>${escapeXmlText(name)}</name>
+      <visibility>1</visibility>
+      ${description.isNotEmpty ? '<description><![CDATA[$description]]></description>' : ''}
+      <Style>
+        <LineStyle>
+          <color>$lineColorAbgr</color>
+          <width>$lineWidth</width>
+        </LineStyle>
+      </Style>
+      <LineString>
+        <extrude>1</extrude>
+        <tessellate>1</tessellate>
+        <altitudeMode>relativeToGround</altitudeMode>
+        <coordinates>$coords</coordinates>
+      </LineString>
+    </Placemark>''';
+  }
+
+  /// Builds a 3D extruded polygonal territory zone with wall extrusion.
+  static String build3DExtrudedTerritory({
+    required String coordinates,
+    required String fillColorAbgr,
+    required String boundaryColorAbgr,
+    double altitudeMeters = 5000.0,
+    double lineWidth = 3.0,
+    String name = '3D Extruded Territory',
+    String description = '',
+  }) {
+    return '''
+    <Placemark>
+      <name>${escapeXmlText(name)}</name>
+      <visibility>1</visibility>
+      ${description.isNotEmpty ? '<description><![CDATA[$description]]></description>' : ''}
+      <Style>
+        <PolyStyle>
+          <color>$fillColorAbgr</color>
+          <outline>1</outline>
+        </PolyStyle>
+        <LineStyle>
+          <color>$boundaryColorAbgr</color>
+          <width>$lineWidth</width>
+        </LineStyle>
+      </Style>
+      <Polygon>
+        <extrude>1</extrude>
+        <tessellate>1</tessellate>
+        <altitudeMode>relativeToGround</altitudeMode>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>$coordinates</coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>''';
+  }
 
   static String build3DMeshAndSpikes({
     required double centerLat,
@@ -2513,8 +2839,6 @@ class LG3DVisuals {
         ''');
       }
     }
-
-    // 3D Cones / Pyramids at Hotspot Nodes
     final hotspotOffsets = [
       {'dLat': 0.12,  'dLon': -0.12, 'scale': 1.0},
       {'dLat': -0.20, 'dLon': 0.18,  'scale': 0.85},
@@ -2585,18 +2909,16 @@ class LG3DVisuals {
     required double centerLon,
     required double spanDeg,
     required double heightMeters,
-    required List<String> faceColorsAbgr, // 5 colors: South, East, North, West, Top
+    required List<String> faceColorsAbgr,
     String name = '3D Box',
     String description = '',
   }) {
     final half = spanDeg / 2;
-    // Ground Coordinates (altitude = 0)
     final swG = '${centerLon - half},${centerLat - half},0';
     final seG = '${centerLon + half},${centerLat - half},0';
     final neG = '${centerLon + half},${centerLat + half},0';
     final nwG = '${centerLon - half},${centerLat + half},0';
 
-    // Top Coordinates (altitude = heightMeters)
     final h = heightMeters.toStringAsFixed(1);
     final swT = '${centerLon - half},${centerLat - half},$h';
     final seT = '${centerLon + half},${centerLat - half},$h';
@@ -2693,7 +3015,7 @@ class LG3DVisuals {
     required double centerLon,
     required double radiusDeg,
     required double heightMeters,
-    required List<String> sideColorsAbgr, // 9 colors: 8 sides + 1 top
+    required List<String> sideColorsAbgr,
     String name = '3D Octagonal Column',
     String description = '',
   }) {
@@ -2761,7 +3083,7 @@ class LG3DVisuals {
     required double centerLon,
     required double radiusDeg,
     required double heightMeters,
-    required List<String> faceColorsAbgr, // 8 colors
+    required List<String> faceColorsAbgr,
     String name = '3D Heat Dome',
     String description = '',
   }) {
@@ -2821,14 +3143,10 @@ class LG3DVisuals {
     String description = '',
   }) {
     final half = spanDeg / 2;
-
-    // Base Corners on Ground (altitude = 0)
     final sw = '${centerLon - half},${centerLat - half},0';
     final se = '${centerLon + half},${centerLat - half},0';
     final ne = '${centerLon + half},${centerLat + half},0';
     final nw = '${centerLon - half},${centerLat + half},0';
-
-    // Apex / Peak at the center with altitude heightMeters
     final h = heightMeters.toStringAsFixed(1);
     final peak = '$centerLon,$centerLat,$h';
 

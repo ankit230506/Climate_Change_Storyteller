@@ -14,6 +14,10 @@ import 'climate_year_slider.dart';
 import 'package:climate_storyteller/features/narrator/narration_result.dart';
 import 'package:climate_storyteller/core/storage/secure_storage_service.dart';
 import 'package:climate_storyteller/features/explore/climate_era.dart';
+import 'package:climate_storyteller/features/lg_connection/lg_overlays.dart';
+import 'package:climate_storyteller/features/lg_connection/lg_rig_state.dart';
+import 'package:climate_storyteller/features/explore/add_region_screen.dart';
+import 'package:climate_storyteller/features/explore/custom_region_service.dart';
 
 class ExploreScreen extends StatefulWidget {
   const ExploreScreen({super.key});
@@ -32,6 +36,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
   bool _isLoadingKml = false;
   bool _isProgrammaticMove = false;
   StreamSubscription<LgViewpoint>? _vpSub;
+  StreamSubscription<List<ClimateRegion>>? _customRegionsSub;
 
   bool _isNarrating = false;
   bool _isNarrationLoading = false;
@@ -50,11 +55,16 @@ class _ExploreScreenState extends State<ExploreScreen> {
         });
       }
     });
+
+    _customRegionsSub = CustomRegionService.instance.regionsStream.listen((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
   void dispose() {
     _vpSub?.cancel();
+    _customRegionsSub?.cancel();
     DI.lgService.stopLgViewpointPolling();
     DI.narratorService.stop();
     super.dispose();
@@ -111,18 +121,20 @@ class _ExploreScreenState extends State<ExploreScreen> {
     }
   }
 
-  static const _cats = ['All','Glaciers','Sea Level','Forests','Heat'];
+  static const _cats = ['All','Glaciers','Sea Level','Forests','Heat', 'AQI'];
 
   List<ClimateRegion> get _filtered {
-    if (_category == 'All') return kDefaultRegions;
+    final allRegions = [...kDefaultRegions, ...CustomRegionService.instance.customRegions];
+    if (_category == 'All') return allRegions;
     final cat = switch (_category) {
       'Glaciers'  => 'glacier',
       'Sea Level' => 'sealevel',
       'Forests'   => 'forest',
       'Heat'      => 'heat',
+      'AQI'       => 'aqi',
       _           => '',
     };
-    return kDefaultRegions.where((r) => r.category == cat).toList();
+    return allRegions.where((r) => r.category == cat).toList();
   }
 
   Color _catColor(String c) => switch (c) {
@@ -130,6 +142,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
     'sealevel' => AppColors.seaLevel,
     'forest'   => AppColors.forest,
     'heat'     => AppColors.warning,
+    'aqi'      => AppColors.critical,
     _          => AppColors.textSecondary,
   };
 
@@ -138,6 +151,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
     'sealevel' => Icons.water,
     'forest'   => Icons.forest,
     'heat'     => Icons.thermostat,
+    'aqi'      => Icons.air,
     _          => Icons.place,
   };
 
@@ -463,15 +477,17 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   InteractiveViewer(
-                    child: Image.network(
-                      region.imageUrl,
+                    child: Image.asset(
+                      region.assetPath,
                       fit: BoxFit.contain,
-                      loadingBuilder: (_, child, loading) => loading == null
-                          ? child
-                          : const Padding(
-                              padding: EdgeInsets.all(40),
-                              child: CircularProgressIndicator(color: Colors.white),
-                            ),
+                      errorBuilder: (_, __, ___) => Image.network(
+                        region.imageUrl,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) => Image.memory(
+                          LGOverlays.createRegionBannerPng(region.id, region.name, region.category),
+                          fit: BoxFit.contain,
+                        ),
+                      ),
                     ),
                   ),
                   Container(
@@ -516,17 +532,12 @@ class _ExploreScreenState extends State<ExploreScreen> {
     lg.stopOrbit();
     setState(() => _isLoadingKml = true);
     try {
-      // 1. Fly to target region coordinate FIRST so Google Earth camera reaches destination
       await lg.flyTo(
         latitude: region.latitude,
         longitude: region.longitude,
         altitude: region.altitude,
       );
-
-      // 2. Wait for Google Earth's flight to reach desired coordinate
       await Future.delayed(const Duration(milliseconds: 2500));
-
-      // 3. Build & upload KML for the region onto LG (KML loads)
       final kmlPath = await lg.buildKmlForYear(
         region: region,
         year: year,
@@ -541,35 +552,13 @@ class _ExploreScreenState extends State<ExploreScreen> {
         longitude: region.longitude,
         altitude: region.altitude,
       );
-
-      // 4. Set KML loading as completed once KML is sent to LG
       if (mounted) {
         setState(() => _isLoadingKml = false);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Loaded ${region.name} KML on LG! Orbit starting in 7s...'),
+          content: Text('Loaded ${region.name} KML on LG!'),
           backgroundColor: AppColors.primary.withValues(alpha: 0.9),
-          duration: const Duration(seconds: 3),
+          duration: const Duration(seconds: 2),
         ));
-      }
-
-      // 5. Wait 7 seconds AFTER the KML is loaded before starting orbit
-      await Future.delayed(const Duration(seconds: 7));
-
-      // 6. Start 3D orbit rotation loop after 7 seconds delay (if still on this region)
-      if (mounted && _selected?.id == region.id && lg.state.isConnected) {
-        await lg.startOrbit(
-          latitude: region.latitude,
-          longitude: region.longitude,
-          altitude: region.altitude,
-          flightDelay: Duration.zero,
-        );
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Started 3D Orbit for ${region.name} on LG!'),
-            backgroundColor: AppColors.good,
-            duration: const Duration(seconds: 2),
-          ));
-        }
       }
     } catch (e) {
       debugPrint('Error launching KML on LG tap: $e');
@@ -583,12 +572,20 @@ class _ExploreScreenState extends State<ExploreScreen> {
     final colors = AppColors.of(context);
     return Scaffold(
       backgroundColor: colors.bg0,
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const AddRegionScreen()),
+          );
+        },
+        backgroundColor: AppColors.primary,
+        child: const Icon(Icons.add_location_alt, color: Colors.white),
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Header ──────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
                 child: Column(
@@ -601,8 +598,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-
-              // ── Category filters ─────────────────────────────────────
               SizedBox(
                 height: 38,
                 child: ListView(
@@ -643,8 +638,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-
-              // ── Map view container ───────────────────────────────────
               Container(
                 height: 250,
                 margin: const EdgeInsets.symmetric(horizontal: 20),
@@ -705,8 +698,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-
-              // ── Active Selected Region Card (Full Width with Tap-to-Enlarge Image) ──
               if (_selected != null)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -723,22 +714,28 @@ class _ExploreScreenState extends State<ExploreScreen> {
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Tap image thumbnail to view full-screen enlarge modal!
                             GestureDetector(
                               onTap: () => _showEnlargedImage(context, _selected!),
                               child: Stack(
                                 children: [
                                   ClipRRect(
                                     borderRadius: BorderRadius.circular(12),
-                                    child: Image.network(
-                                      _selected!.imageUrl,
+                                    child: Image.asset(
+                                      _selected!.assetPath,
                                       width: 110,
                                       height: 85,
                                       fit: BoxFit.cover,
-                                      errorBuilder: (_, __, ___) => Container(
-                                        width: 110, height: 85,
-                                        color: colors.bg3,
-                                        child: Icon(Icons.image_not_supported, color: colors.textMuted),
+                                      errorBuilder: (_, __, ___) => Image.network(
+                                        _selected!.imageUrl,
+                                        width: 110,
+                                        height: 85,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) => Image.memory(
+                                          LGOverlays.createRegionBannerPng(_selected!.id, _selected!.name, _selected!.category),
+                                          width: 110,
+                                          height: 85,
+                                          fit: BoxFit.cover,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -808,8 +805,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
                   ),
                 ),
               const SizedBox(height: 14),
-
-              // ── Spacious Full-Width Time Slider Card ─────────────────────────
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Container(
@@ -864,28 +859,69 @@ class _ExploreScreenState extends State<ExploreScreen> {
                           'Select a climate region to activate LG time slider',
                           style: AppTypography.bodySmall.copyWith(color: colors.textMuted, fontSize: 12),
                         ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 44,
-                        child: ElevatedButton.icon(
-                          onPressed: _selected != null
-                              ? () => _launchRegionOnLG(_selected!, _selectedYear)
-                              : null,
-                          icon: const Icon(Icons.public, size: 18, color: Colors.white),
-                          label: Text(
-                            _selected != null ? 'Reload ${_selected!.name} KML on LG' : 'Select a Region Pin',
-                            style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 3,
+                            child: SizedBox(
+                              height: 44,
+                              child: ElevatedButton.icon(
+                                onPressed: _selected != null
+                                    ? () => _launchRegionOnLG(_selected!, _selectedYear)
+                                    : null,
+                                icon: const Icon(Icons.public, size: 18, color: Colors.white),
+                                label: Text(
+                                  _selected != null ? 'Reload KML' : 'Select a Region Pin',
+                                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            flex: 2,
+                            child: StreamBuilder<LGRigState>(
+                              stream: DI.lgService.stateStream,
+                              initialData: DI.lgService.state,
+                              builder: (context, snapshot) {
+                                final isOrbiting = snapshot.data?.isOrbiting ?? false;
+                                final isConnected = snapshot.data?.isConnected ?? false;
+                                return SizedBox(
+                                  height: 44,
+                                  child: ElevatedButton.icon(
+                                    onPressed: _selected != null && isConnected
+                                        ? () => DI.lgService.toggleOrbit(
+                                              latitude: _selected!.latitude,
+                                              longitude: _selected!.longitude,
+                                              altitude: _selected!.altitude,
+                                            )
+                                        : null,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: isOrbiting ? AppColors.critical : AppColors.accent,
+                                      foregroundColor: Colors.white,
+                                      elevation: 0,
+                                    ),
+                                    icon: Icon(
+                                      isOrbiting ? Icons.stop_circle : Icons.rotate_right,
+                                      size: 18,
+                                      color: Colors.white,
+                                    ),
+                                    label: Text(
+                                      isOrbiting ? 'Stop Orbit' : '3D Orbit',
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                 ),
               ),
               const SizedBox(height: 20),
-
-              // ── Bottom Section: 2-Block Horizontal Layout (Settings-Style) of Climate Regions ──
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Text('CLIMATE REGIONS', style: AppTypography.label.copyWith(color: colors.textMuted)),
@@ -982,8 +1018,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
     );
   }
 }
-
-// ── Proper map pin widget ─────────────────────────────────────────────────────
 class _MapPin extends StatelessWidget {
   final Color    color;
   final IconData icon;
@@ -1002,7 +1036,6 @@ class _MapPin extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Label above pin (only when selected)
         if (isSelected)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -1019,8 +1052,6 @@ class _MapPin extends StatelessWidget {
               ),
             ),
           ),
-
-        // Pin head (circle with icon)
         AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           width:  isSelected ? 36 : 30,
@@ -1040,8 +1071,6 @@ class _MapPin extends StatelessWidget {
           child: Icon(icon, color: Colors.white,
               size: isSelected ? 18 : 14),
         ),
-
-        // Pin tail (triangle pointer)
         CustomPaint(
           size: const Size(10, 6),
           painter: _PinTailPainter(color: color),

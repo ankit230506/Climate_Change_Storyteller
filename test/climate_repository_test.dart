@@ -29,7 +29,7 @@ void main() {
     test('should fallback to interpolated local data when remote call fails', () async {
       final stats = await service.getStatsForYear(2026);
       expect(stats.year, 2026);
-      expect(stats.tempAnomaly, 1.3); // Interpolated temperature anomaly for 2026
+      expect(stats.tempAnomaly, 1.3);
       expect(stats.source, contains('NOAA live data + IPCC AR6'));
     });
   });

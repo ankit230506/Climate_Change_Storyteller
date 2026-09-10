@@ -46,7 +46,6 @@ class AppColorScheme {
 }
 
 class AppColors {
-  // Dark palette constants
   static const darkBg0 = Color(0xFF07080F);
   static const darkBg1 = Color(0xFF0E1018);
   static const darkBg2 = Color(0xFF161824);
@@ -55,8 +54,6 @@ class AppColors {
   static const darkTextSecondary = Color(0xFF8892AA);
   static const darkTextMuted = Color(0xFF727D9A);
   static const darkCardBorder = Color(0xFF1E2235);
-
-  // Light palette constants
   static const lightBg0 = Color(0xFFF4F6FA);
   static const lightBg1 = Color(0xFFFFFFFF);
   static const lightBg2 = Color(0xFFEBF0F7);
@@ -65,8 +62,6 @@ class AppColors {
   static const lightTextSecondary = Color(0xFF334155);
   static const lightTextMuted = Color(0xFF64748B);
   static const lightCardBorder = Color(0xFFCBD5E1);
-
-  // Static constants for backward compatibility
   static const bg0 = darkBg0;
   static const bg1 = darkBg1;
   static const bg2 = darkBg2;
@@ -76,27 +71,19 @@ class AppColors {
   static const textSecondary = darkTextSecondary;
   static const textMuted = darkTextMuted;
   static const cardBorder = darkCardBorder;
-
-  // Context-aware color accessor for dynamic theme evaluation
   static AppColorScheme of(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return isDark ? AppColorScheme.dark() : AppColorScheme.light();
   }
-
-  // Accent — rich teal-cyan system
-  static const primary = Color(0xFF00A884);   // main teal
-  static const primaryDim = Color(0xFF00896C); // pressed teal
-  static const secondary = Color(0xFF0284C7); // blue-cyan
-  static const accent = Color(0xFF00B4D8);    // highlight / glow
-
-  // Semantic
+  static const primary = Color(0xFF00A884);
+  static const primaryDim = Color(0xFF00896C);
+  static const secondary = Color(0xFF0284C7);
+  static const accent = Color(0xFF00B4D8);
   static const critical = Color(0xFFFF4D4D);
   static const warning = Color(0xFFFFB347);
   static const good = Color(0xFF4CAF50);
   static const ready = Color(0xFF00A884);
   static const loading = Color(0xFF0284C7);
-
-  // KML layer type colors
   static const glacier = Color(0xFF0284C7);
   static const seaLevel = Color(0xFF0097A7);
   static const forest = Color(0xFF388E3C);
@@ -104,7 +91,6 @@ class AppColors {
 }
 
 class AppTypography {
-  // Bold, rounded display typography (Outfit) & readable body typography (Nunito)
   static TextStyle heading1 = GoogleFonts.outfit(
     fontSize: 28,
     fontWeight: FontWeight.w800,
@@ -190,8 +176,6 @@ class AppTheme {
         labelMedium: GoogleFonts.outfit(color: AppColors.lightTextSecondary, fontWeight: FontWeight.w600),
         labelSmall: GoogleFonts.nunito(color: AppColors.lightTextMuted, fontWeight: FontWeight.w600),
       ),
-
-      // AppBar
       appBarTheme: AppBarTheme(
         backgroundColor: AppColors.lightBg0,
         elevation: 0,
@@ -205,8 +189,6 @@ class AppTheme {
         ),
         iconTheme: const IconThemeData(color: AppColors.lightTextPrimary),
       ),
-
-      // Bottom Navigation
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(
         backgroundColor: AppColors.lightBg1,
         selectedItemColor: AppColors.primary,
@@ -214,8 +196,6 @@ class AppTheme {
         type: BottomNavigationBarType.fixed,
         elevation: 0,
       ),
-
-      // Cards
       cardTheme: const CardThemeData(
         color: AppColors.lightBg1,
         elevation: 0,
@@ -225,8 +205,6 @@ class AppTheme {
         ),
         margin: EdgeInsets.symmetric(vertical: 6),
       ),
-
-      // Elevated button — primary CTA
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.primary,
@@ -243,8 +221,6 @@ class AppTheme {
           elevation: 0,
         ),
       ),
-
-      // Outlined button — secondary
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.lightTextPrimary,
@@ -259,8 +235,6 @@ class AppTheme {
           ),
         ),
       ),
-
-      // Input decoration
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: AppColors.lightBg3,
@@ -280,8 +254,6 @@ class AppTheme {
         hintStyle: GoogleFonts.nunito(fontSize: 13, color: AppColors.lightTextMuted),
         labelStyle: GoogleFonts.nunito(fontSize: 13, color: AppColors.lightTextSecondary),
       ),
-
-      // Chip
       chipTheme: ChipThemeData(
         backgroundColor: AppColors.lightBg3,
         labelStyle: GoogleFonts.outfit(
@@ -296,8 +268,6 @@ class AppTheme {
         ),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       ),
-
-      // Slider
       sliderTheme: const SliderThemeData(
         activeTrackColor: AppColors.primary,
         inactiveTrackColor: AppColors.lightBg3,
@@ -305,21 +275,15 @@ class AppTheme {
         overlayColor: Color(0x2200A884),
         trackHeight: 4,
       ),
-
-      // Divider
       dividerTheme: const DividerThemeData(
         color: AppColors.lightCardBorder,
         thickness: 1,
         space: 1,
       ),
-
-      // BottomSheet
       bottomSheetTheme: const BottomSheetThemeData(
         backgroundColor: AppColors.lightBg1,
         surfaceTintColor: Colors.transparent,
       ),
-
-      // Dialog
       dialogTheme: DialogThemeData(
         backgroundColor: AppColors.lightBg1,
         titleTextStyle: GoogleFonts.outfit(
@@ -371,8 +335,6 @@ class AppTheme {
         labelMedium: GoogleFonts.outfit(color: AppColors.darkTextSecondary, fontWeight: FontWeight.w600),
         labelSmall: GoogleFonts.nunito(color: AppColors.darkTextMuted, fontWeight: FontWeight.w600),
       ),
-
-      // AppBar
       appBarTheme: AppBarTheme(
         backgroundColor: AppColors.darkBg0,
         elevation: 0,
@@ -386,8 +348,6 @@ class AppTheme {
         ),
         iconTheme: const IconThemeData(color: AppColors.darkTextPrimary),
       ),
-
-      // Bottom Navigation
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(
         backgroundColor: AppColors.darkBg1,
         selectedItemColor: AppColors.primary,
@@ -395,8 +355,6 @@ class AppTheme {
         type: BottomNavigationBarType.fixed,
         elevation: 0,
       ),
-
-      // Cards
       cardTheme: const CardThemeData(
         color: AppColors.darkBg1,
         elevation: 0,
@@ -406,8 +364,6 @@ class AppTheme {
         ),
         margin: EdgeInsets.symmetric(vertical: 6),
       ),
-
-      // Elevated button — primary CTA
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.primary,
@@ -424,8 +380,6 @@ class AppTheme {
           elevation: 0,
         ),
       ),
-
-      // Outlined button — secondary
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.darkTextPrimary,
@@ -440,8 +394,6 @@ class AppTheme {
           ),
         ),
       ),
-
-      // Input decoration
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: AppColors.darkBg3,
@@ -461,8 +413,6 @@ class AppTheme {
         hintStyle: GoogleFonts.nunito(fontSize: 13, color: AppColors.darkTextMuted),
         labelStyle: GoogleFonts.nunito(fontSize: 13, color: AppColors.darkTextSecondary),
       ),
-
-      // Chip
       chipTheme: ChipThemeData(
         backgroundColor: AppColors.darkBg3,
         labelStyle: GoogleFonts.outfit(
@@ -477,8 +427,6 @@ class AppTheme {
         ),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       ),
-
-      // Slider
       sliderTheme: const SliderThemeData(
         activeTrackColor: AppColors.primary,
         inactiveTrackColor: AppColors.darkBg3,
@@ -486,21 +434,15 @@ class AppTheme {
         overlayColor: Color(0x2200A884),
         trackHeight: 4,
       ),
-
-      // Divider
       dividerTheme: const DividerThemeData(
         color: Color(0xFF1A1E2E),
         thickness: 1,
         space: 1,
       ),
-
-      // BottomSheet
       bottomSheetTheme: const BottomSheetThemeData(
         backgroundColor: AppColors.darkBg1,
         surfaceTintColor: Colors.transparent,
       ),
-
-      // Dialog
       dialogTheme: DialogThemeData(
         backgroundColor: AppColors.darkBg1,
         titleTextStyle: GoogleFonts.outfit(

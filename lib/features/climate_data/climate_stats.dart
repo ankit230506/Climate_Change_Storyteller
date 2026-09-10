@@ -1,10 +1,10 @@
 class ClimateStats {
   final int    year;
-  final double tempAnomaly;    // °C above 1900 baseline
-  final double seaLevelMm;     // mm above 1900 baseline
-  final double iceExtentMkm2;  // million km²
-  final double forestLossPct;  // % of 1900 cover lost
-  final String source;         // data attribution string
+  final double tempAnomaly;
+  final double seaLevelMm;
+  final double iceExtentMkm2;
+  final double forestLossPct;
+  final String source;
 
   const ClimateStats({
     required this.year,

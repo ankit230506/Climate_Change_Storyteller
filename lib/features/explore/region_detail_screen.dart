@@ -71,13 +71,10 @@ class _RegionDetailScreenState extends State<RegionDetailScreen> {
     setState(() => _layerStatus[layer.filename] = _LayerStatus.loading);
 
     try {
-      // Build the KML
       final kmlPath = await DI.lgService.buildKml(
         region: widget.region,
         era: layer.era,
       );
-
-      // Read the KML content
       String kmlContent = '';
       if (!kIsWeb) {
         final file = File(kmlPath);
@@ -88,8 +85,6 @@ class _RegionDetailScreenState extends State<RegionDetailScreen> {
 
       await DI.lgService.sendKml(layer.filename, kmlContent: kmlContent);
       await Future.delayed(const Duration(seconds: 2));
-
-      // Fly to the region
       await DI.lgService.flyTo(
         latitude: widget.region.latitude,
         longitude: widget.region.longitude,
@@ -132,7 +127,6 @@ class _RegionDetailScreenState extends State<RegionDetailScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Region badges
               Row(
                 children: [
                   if (widget.region.riskLevel != null)
@@ -150,8 +144,6 @@ class _RegionDetailScreenState extends State<RegionDetailScreen> {
                 ],
               ),
               const SizedBox(height: 16),
-
-              // Map stub
               Container(
                 height: 200,
                 decoration: BoxDecoration(
@@ -168,17 +160,13 @@ class _RegionDetailScreenState extends State<RegionDetailScreen> {
                 ),
               ),
               const SizedBox(height: 20),
-
-              // KML Layers
-              const SectionHeader(title: 'KML Layers'),
+              SectionHeader(title: DI.languageService.translate('climate_layers')),
               ..._layers.map((l) => _KmlLayerTile(
                 layer: l,
                 status: _layerStatus[l.filename] ?? _LayerStatus.ready,
                 onTap: () => _sendLayer(l),
               )),
               const SizedBox(height: 24),
-
-              // 3D Orbit Tour CTA
               StreamBuilder<LGRigState>(
                 stream: DI.lgService.stateStream,
                 initialData: DI.lgService.state,
@@ -196,7 +184,9 @@ class _RegionDetailScreenState extends State<RegionDetailScreen> {
                       color: Colors.white,
                     ),
                     label: Text(
-                      isOrbiting ? 'Stop 3D Orbit' : '🛸 3D Orbit Tour on LG',
+                      isOrbiting
+                          ? DI.languageService.translate('btn_stop_orbit')
+                          : '🛸 ${DI.languageService.translate('btn_orbit_region')}',
                       style: const TextStyle(color: Colors.white),
                     ),
                     style: ElevatedButton.styleFrom(
@@ -207,13 +197,11 @@ class _RegionDetailScreenState extends State<RegionDetailScreen> {
                 },
               ),
               const SizedBox(height: 12),
-
-              // Fly to CTA
               ElevatedButton.icon(
                 onPressed: _flyToRegion,
                 icon: const Icon(Icons.public, size: 18, color: Colors.white),
                 label: Text(
-                  'Fly to ${widget.region.name} on LG',
+                  '${DI.languageService.translate('btn_fly_to_region')} — ${widget.region.name}',
                   style: const TextStyle(color: Colors.white),
                 ),
                 style: ElevatedButton.styleFrom(
@@ -229,10 +217,10 @@ class _RegionDetailScreenState extends State<RegionDetailScreen> {
   }
 
   String _categoryLabel(String cat) => switch (cat) {
-        'glacier' => 'Glacier',
-        'sealevel' => 'Sea Level',
-        'forest' => 'Forest',
-        'heat' => 'Heat',
+        'glacier' => DI.languageService.translate('cat_glaciers'),
+        'sealevel' => DI.languageService.translate('cat_sealevel'),
+        'forest' => DI.languageService.translate('cat_forests'),
+        'heat' => DI.languageService.translate('cat_heat'),
         _ => cat,
       };
 
@@ -308,7 +296,7 @@ class _KmlLayerTile extends StatelessWidget {
                 children: [
                   Text(layer.name, style: AppTypography.bodyLarge.copyWith(color: colors.textPrimary)),
                   Text(
-                    'Tap to load on LG',
+                    DI.languageService.translate('status_send_to_lg'),
                     style: AppTypography.caption.copyWith(color: colors.textSecondary),
                   ),
                 ],

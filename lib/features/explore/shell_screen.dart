@@ -2,14 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:climate_storyteller/core/constant/app_theme.dart';
 import 'package:climate_storyteller/features/explore/explore_screen.dart';
-import 'package:climate_storyteller/features/explore/timeline_screen.dart';
-import 'package:climate_storyteller/features/narrator/narrator_screen.dart';
 import 'package:climate_storyteller/features/explore/story_mode_screen.dart';
 import 'package:climate_storyteller/features/explore/settings_screen.dart';
 import 'package:climate_storyteller/features/lg_connection/lg_rig_state.dart';
 import 'package:climate_storyteller/core/theme/theme_service.dart';
 import 'package:climate_storyteller/core/di/injection_container.dart';
 import 'package:climate_storyteller/core/localization/language_service.dart';
+import 'dart:ui';
+
 
 class ShellScreen extends StatefulWidget {
   const ShellScreen({super.key});
@@ -22,11 +22,9 @@ class _ShellScreenState extends State<ShellScreen> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   final List<Widget> _screens = [
-    const ExploreScreen(),       // 0 - Map + regions
-    const TimelineScreen(),      // 1 - 1900/2026/2100 + NOAA stats
-    const NarratorScreen(),      // 2 - Gemini + Flutter TTS
-    const StoryModeScreen(),     // 3 - Auto-play chapters
-    const SettingsScreen(),      // 4 - LG connect + API keys
+    const ExploreScreen(),
+    const StoryModeScreen(),
+    const SettingsScreen(),
   ];
 
   @override
@@ -39,14 +37,12 @@ class _ShellScreenState extends State<ShellScreen> {
         currentIndex: _currentIndex,
         onSelectScreen: (index) {
           setState(() => _currentIndex = index);
-          Navigator.pop(context); // Close drawer
+          Navigator.pop(context);
         },
       ),
       body: Stack(
         children: [
           IndexedStack(index: _currentIndex, children: _screens),
-
-          // Floating top-right 3-line menu button
           Positioned(
             top: 10,
             right: 12,
@@ -71,7 +67,7 @@ class _ShellScreenState extends State<ShellScreen> {
                       ],
                     ),
                     child: Icon(
-                      Icons.menu, // 3 lines menu icon
+                      Icons.menu,
                       color: colors.textPrimary,
                       size: 22,
                     ),
@@ -101,27 +97,28 @@ class _AppNavigationDrawer extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final navItems = [
-      (Icons.explore_outlined, Icons.explore, 'nav_explore', 'Interactive Map & Regions'),
-      (Icons.calendar_month_outlined, Icons.calendar_month, 'nav_timeline', 'Time Travel 1900 → 2100'),
-      (Icons.record_voice_over_outlined, Icons.record_voice_over, 'nav_narrator', 'AI Storyteller Narration'),
-      (Icons.auto_stories_outlined, Icons.auto_stories, 'nav_story', 'Automated Story Chapters'),
-      (Icons.settings_outlined, Icons.settings, 'nav_settings', 'Liquid Galaxy & Setup'),
+      (Icons.explore_outlined, Icons.explore, 'nav_explore', 'nav_explore_sub'),
+      (Icons.auto_stories_outlined, Icons.auto_stories, 'nav_story', 'nav_story_sub'),
+      (Icons.settings_outlined, Icons.settings, 'nav_settings', 'nav_settings_sub'),
     ];
 
     return Drawer(
-      backgroundColor: colors.bg1,
+      backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.horizontal(left: Radius.circular(24)),
-      ),
-      child: StreamBuilder<AppLanguage>(
-        stream: DI.languageService.languageStream,
-        initialData: DI.languageService.currentLanguage,
-        builder: (context, langSnap) {
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        child: Container(
+          decoration: BoxDecoration(
+            color: colors.bg1.withValues(alpha: 0.8),
+            borderRadius: const BorderRadius.horizontal(left: Radius.circular(24)),
+          ),
+          child: StreamBuilder<AppLanguage>(
+            stream: DI.languageService.languageStream,
+            initialData: DI.languageService.currentLanguage,
+            builder: (context, langSnap) {
           return SafeArea(
             child: Column(
               children: [
-                // Header
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
                   child: Column(
@@ -148,7 +145,7 @@ class _AppNavigationDrawer extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Climate Storyteller',
+                                  DI.languageService.translate('drawer_title'),
                                   style: GoogleFonts.outfit(
                                     fontSize: 18,
                                     fontWeight: FontWeight.bold,
@@ -156,7 +153,7 @@ class _AppNavigationDrawer extends StatelessWidget {
                                   ),
                                 ),
                                 Text(
-                                  'Liquid Galaxy Visualizer',
+                                  DI.languageService.translate('drawer_subtitle'),
                                   style: GoogleFonts.nunito(
                                     fontSize: 12,
                                     color: colors.textSecondary,
@@ -199,7 +196,9 @@ class _AppNavigationDrawer extends StatelessWidget {
                                 ),
                                 const SizedBox(width: 6),
                                 Text(
-                                  connected ? 'LG Rig Connected' : 'LG Rig Disconnected',
+                                  connected
+                                      ? DI.languageService.translate('lg_connected')
+                                      : DI.languageService.translate('lg_disconnected'),
                                   style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600,
@@ -216,8 +215,6 @@ class _AppNavigationDrawer extends StatelessWidget {
                 ),
                 Divider(color: colors.cardBorder, height: 1),
                 const SizedBox(height: 8),
-
-                // Navigation item list
                 Expanded(
                   child: ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -253,7 +250,7 @@ class _AppNavigationDrawer extends StatelessWidget {
                               ),
                             ),
                             subtitle: Text(
-                              item.$4,
+                              DI.languageService.translate(item.$4),
                               style: GoogleFonts.nunito(
                                 fontSize: 11,
                                 color: colors.textSecondary,
@@ -271,8 +268,6 @@ class _AppNavigationDrawer extends StatelessWidget {
                 ),
 
                 Divider(color: colors.cardBorder, height: 1),
-
-                // Remove KML Action Tile in Sidebar
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   child: Material(
@@ -304,7 +299,7 @@ class _AppNavigationDrawer extends StatelessWidget {
                         ),
                       ),
                       onTap: () async {
-                        Navigator.pop(context); // Close drawer
+                        Navigator.pop(context);
                         if (!DI.lgService.state.isConnected) {
                           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                             content: Text('Not connected to LG Rig — connect in Settings'),
@@ -325,8 +320,6 @@ class _AppNavigationDrawer extends StatelessWidget {
                 ),
 
                 Divider(color: colors.cardBorder, height: 1),
-
-                // Theme Quick Toggle Footer
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
                   child: Row(
@@ -338,7 +331,9 @@ class _AppNavigationDrawer extends StatelessWidget {
                       ),
                       const SizedBox(width: 10),
                       Text(
-                        isDark ? 'Dark Theme' : 'Light Theme',
+                        isDark
+                            ? DI.languageService.translate('dark_theme')
+                            : DI.languageService.translate('theme_light'),
                         style: GoogleFonts.outfit(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
@@ -358,11 +353,26 @@ class _AppNavigationDrawer extends StatelessWidget {
                     ],
                   ),
                 ),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Center(
+                    child: Text(
+                      'v2.0.0 — GeSoC 2026',
+                      style: GoogleFonts.nunito(
+                        fontSize: 10,
+                        color: colors.textMuted,
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
           );
         },
       ),
-    );
+    ),
+  ),
+);
   }
 }
+

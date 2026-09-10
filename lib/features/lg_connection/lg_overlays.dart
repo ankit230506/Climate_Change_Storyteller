@@ -47,8 +47,6 @@ class LGOverlays {
     const width = 300;
     final height = (stats != null && stats.isNotEmpty) ? 420 : 320;
     final pixels = Uint8List(width * height * 4);
-
-    // Dark glassmorphic background card
     _fillRect(pixels, width, height, 0, 0, width, height, 15, 18, 30, 240);
     _drawRectBorder(pixels, width, height, 0, 0, width, height, 50, 75, 110, 255, 2);
 
@@ -191,9 +189,165 @@ class LGOverlays {
     return _encodePng(pixels, width, height);
   }
 
-  // ─────────────────────────────────────────────
-  // Drawing Primitive Helpers
-  // ─────────────────────────────────────────────
+  static final Map<String, Uint8List> _regionBannerCache = {};
+
+  /// Returns PNG bytes for a high-res offline region banner visual card.
+  static Uint8List createRegionBannerPng(String regionId, String regionName, String category) {
+    final cacheKey = '${regionId}_$category';
+    if (_regionBannerCache.containsKey(cacheKey)) {
+      return _regionBannerCache[cacheKey]!;
+    }
+
+    const width = 480;
+    const height = 240;
+    final pixels = Uint8List(width * height * 4);
+
+    final baseColor = switch (category) {
+      'glacier'  => [15, 35, 55],
+      'forest'   => [12, 38, 24],
+      'sealevel' => [10, 32, 58],
+      'heat'     => [48, 22, 14],
+      'aqi'      => [38, 16, 45],
+      _          => [18, 24, 38],
+    };
+
+    final accentColor = switch (category) {
+      'glacier'  => [56, 189, 248],
+      'forest'   => [74, 222, 128],
+      'sealevel' => [96, 165, 250],
+      'heat'     => [251, 146, 60],
+      'aqi'      => [232, 121, 249],
+      _          => [148, 163, 184],
+    };
+    _fillRect(pixels, width, height, 0, 0, width, height, baseColor[0], baseColor[1], baseColor[2], 255);
+    _drawRectBorder(pixels, width, height, 0, 0, width, height, accentColor[0], accentColor[1], accentColor[2], 255, 3);
+    for (int i = 0; i < 4; i++) {
+      final x = 24 + i * 110;
+      _fillRoundedRect(pixels, width, height, x, 24, 98, 40, 6, accentColor[0], accentColor[1], accentColor[2], 40);
+    }
+
+    _drawSimpleText(pixels, width, height, "CLIMATE CHANGE STORYTELLER", 24, 20, 160, 175, 200, 255, scale: 1);
+    _drawLine(pixels, width, height, 24, 38, width - 24, 38, accentColor[0], accentColor[1], accentColor[2], 255, 2);
+
+    _drawSimpleText(pixels, width, height, regionName.toUpperCase(), 24, 52, 255, 255, 255, 255, scale: 3);
+
+    final catTitle = switch (category) {
+      'glacier'  => 'GLACIER & ICE SHEET MELT ZONE',
+      'forest'   => 'TROPICAL FOREST CANOPY LOSS',
+      'sealevel' => 'SEA LEVEL RISE & INUNDATION',
+      'heat'     => 'EXTREME HEAT ANOMALY REGION',
+      'aqi'      => 'URBAN ATMOSPHERIC AQI PROFILE',
+      _          => 'ENVIRONMENTAL MONITORING ZONE',
+    };
+    _drawSimpleText(pixels, width, height, catTitle, 24, 98, accentColor[0], accentColor[1], accentColor[2], 255, scale: 1);
+
+    _fillRect(pixels, width, height, 24, 120, width - 48, 75, 0, 0, 0, 120);
+    _drawRectBorder(pixels, width, height, 24, 120, width - 48, 75, accentColor[0], accentColor[1], accentColor[2], 120, 1);
+
+    _drawSimpleText(pixels, width, height, "DATA MODEL: IPCC AR6 / NASA GIBS SATELLITE", 36, 132, 225, 235, 245, 255, scale: 1);
+    _drawSimpleText(pixels, width, height, "STATUS: HIGH SENSITIVITY CLIMATE TIPPING POINT", 36, 150, 250, 204, 21, 255, scale: 1);
+    _drawSimpleText(pixels, width, height, "OFFLINE VERIFIED LOCAL ASSET FEED", 36, 168, 52, 211, 153, 255, scale: 1);
+
+    _drawSimpleText(pixels, width, height, "LIQUID GALAXY MULTI-DISPLAY SYSTEM", 24, 212, 140, 155, 175, 220, scale: 1);
+
+    final pngBytes = _encodePng(pixels, width, height);
+    _regionBannerCache[cacheKey] = pngBytes;
+    return pngBytes;
+  }
+
+  /// Returns PNG bytes for a Timeline Strip overlay.
+  static Uint8List createTimelineStripPng(String eraLabel, int year) {
+    const width = 360;
+    const height = 60;
+    final pixels = Uint8List(width * height * 4);
+
+    _fillRect(pixels, width, height, 0, 0, width, height, 20, 24, 38, 220);
+    _drawRectBorder(pixels, width, height, 0, 0, width, height, 60, 70, 95, 255, 2);
+
+    const eras = [1900, 1950, 1980, 2026, 2060, 2100];
+    const spacing = (width - 40) / 5;
+
+    _drawLine(pixels, width, height, 20, 30, width - 20, 30, 100, 100, 100, 255, 2);
+
+    for (int i = 0; i < eras.length; i++) {
+      final eraYear = eras[i];
+      final x = 20 + (i * spacing).toInt();
+      
+      if (eraYear <= year) {
+        _fillRoundedRect(pixels, width, height, x - 4, 26, 8, 8, 4, 241, 196, 15, 255);
+      } else {
+        _fillRoundedRect(pixels, width, height, x - 3, 27, 6, 6, 3, 150, 150, 150, 255);
+      }
+      
+      _drawSimpleText(pixels, width, height, "$eraYear", x - 10, 42, 200, 200, 200, 255, scale: 1);
+    }
+    _drawSimpleText(pixels, width, height, "ERA: $eraLabel", 20, 10, 241, 196, 15, 255, scale: 1);
+
+    return _encodePng(pixels, width, height);
+  }
+
+  /// Returns PNG bytes for a Metrics Dashboard overlay.
+  static Uint8List createMetricsDashboardPng(Map<String, String> stats, String category) {
+    const width = 300;
+    const height = 200;
+    final pixels = Uint8List(width * height * 4);
+
+    _fillRect(pixels, width, height, 0, 0, width, height, 15, 18, 30, 240);
+    _drawRectBorder(pixels, width, height, 0, 0, width, height, 50, 75, 110, 255, 2);
+
+    final accentColor = switch (category) {
+      'glacier'  => [56, 189, 248],
+      'forest'   => [74, 222, 128],
+      'sealevel' => [96, 165, 250],
+      'heat'     => [251, 146, 60],
+      'aqi'      => [232, 121, 249],
+      _          => [148, 163, 184],
+    };
+
+    _drawSimpleText(pixels, width, height, "METRICS DASHBOARD", 16, 16, accentColor[0], accentColor[1], accentColor[2], 255, scale: 1);
+    _drawLine(pixels, width, height, 16, 32, width - 16, 32, accentColor[0], accentColor[1], accentColor[2], 180, 1);
+
+    if (stats.isNotEmpty) {
+      final entries = stats.entries.take(4).toList();
+      for (int i = 0; i < entries.length; i++) {
+        final entry = entries[i];
+        final y = 48 + i * 35;
+        
+        _drawSimpleText(pixels, width, height, entry.key, 16, y, 200, 200, 200, 255, scale: 1);
+        _drawSimpleText(pixels, width, height, entry.value, 160, y, 255, 255, 255, 255, scale: 1);
+        _fillRect(pixels, width, height, 16, y + 12, width - 32, 4, 50, 50, 50, 255);
+        
+        final severity = (i + 1) * 0.2 + 0.1;
+        final barW = ((width - 32) * severity).toInt();
+        
+        _fillRect(pixels, width, height, 16, y + 12, barW, 4, accentColor[0], accentColor[1], accentColor[2], 255);
+      }
+    }
+
+    return _encodePng(pixels, width, height);
+  }
+
+  /// Returns PNG bytes for a Sea Level Scenario badge (e.g. "SEA LEVEL: 0.0 M").
+  static Uint8List createSeaLevelBadgePng(String text, {bool isCritical = false}) {
+    const width = 240;
+    const height = 50;
+    final pixels = Uint8List(width * height * 4);
+
+    final bgR = isCritical ? 60 : 15;
+    final bgG = isCritical ? 15 : 25;
+    final bgB = isCritical ? 15 : 45;
+
+    final borderR = isCritical ? 239 : 56;
+    final borderG = isCritical ? 68 : 189;
+    final borderB = isCritical ? 68 : 248;
+
+    _fillRect(pixels, width, height, 0, 0, width, height, bgR, bgG, bgB, 230);
+    _drawRectBorder(pixels, width, height, 0, 0, width, height, borderR, borderG, borderB, 255, 2);
+
+    _drawSimpleText(pixels, width, height, text.toUpperCase(), 16, 16, 255, 255, 255, 255, scale: 2);
+
+    return _encodePng(pixels, width, height);
+  }
 
   static void _fillRect(Uint8List pixels, int imgW, int imgH, int rx, int ry, int rw, int rh, int r, int g, int b, int a) {
     for (int y = ry; y < ry + rh && y < imgH; y++) {
@@ -210,10 +364,10 @@ class LGOverlays {
   }
 
   static void _drawRectBorder(Uint8List pixels, int imgW, int imgH, int rx, int ry, int rw, int rh, int r, int g, int b, int a, int thickness) {
-    _fillRect(pixels, imgW, imgH, rx, ry, rw, thickness, r, g, b, a); // Top
-    _fillRect(pixels, imgW, imgH, rx, ry + rh - thickness, rw, thickness, r, g, b, a); // Bottom
-    _fillRect(pixels, imgW, imgH, rx, ry, thickness, rh, r, g, b, a); // Left
-    _fillRect(pixels, imgW, imgH, rx + rw - thickness, ry, thickness, rh, r, g, b, a); // Right
+    _fillRect(pixels, imgW, imgH, rx, ry, rw, thickness, r, g, b, a);
+    _fillRect(pixels, imgW, imgH, rx, ry + rh - thickness, rw, thickness, r, g, b, a);
+    _fillRect(pixels, imgW, imgH, rx, ry, thickness, rh, r, g, b, a);
+    _fillRect(pixels, imgW, imgH, rx + rw - thickness, ry, thickness, rh, r, g, b, a);
   }
 
   static void _fillRoundedRect(Uint8List pixels, int imgW, int imgH, int rx, int ry, int rw, int rh, int radius, int r, int g, int b, int a) {
@@ -223,8 +377,6 @@ class LGOverlays {
   static void _drawLine(Uint8List pixels, int imgW, int imgH, int x1, int y1, int x2, int y2, int r, int g, int b, int a, int thickness) {
     _fillRect(pixels, imgW, imgH, x1, y1, (x2 - x1).abs(), thickness, r, g, b, a);
   }
-
-  // Minimal 5x7 bitmap font rendering for uppercase ASCII characters
   static const Map<String, List<int>> _font = {
     'A': [0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11],
     'B': [0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E],
@@ -296,17 +448,13 @@ class LGOverlays {
     }
   }
 
-  // ─────────────────────────────────────────────
-  // Pure Dart PNG Encoder with zlib
-  // ─────────────────────────────────────────────
-
   static Uint8List _encodePng(Uint8List rawRgba, int w, int h) {
     final rawScanlines = Uint8List(h * (1 + w * 4));
     int srcIdx = 0;
     int dstIdx = 0;
 
     for (int y = 0; y < h; y++) {
-      rawScanlines[dstIdx++] = 0; // Filter type: None
+      rawScanlines[dstIdx++] = 0;
       for (int x = 0; x < w * 4; x++) {
         rawScanlines[dstIdx++] = rawRgba[srcIdx++];
       }
@@ -314,25 +462,17 @@ class LGOverlays {
 
     final compressed = zlib.encode(rawScanlines);
     final bb = BytesBuilder();
-
-    // PNG Signature
     bb.add([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
-
-    // IHDR Chunk
     final ihdrData = ByteData(13)
       ..setUint32(0, w, Endian.big)
       ..setUint32(4, h, Endian.big)
-      ..setUint8(8, 8)   // bit depth
-      ..setUint8(9, 6)   // color type: RGBA
-      ..setUint8(10, 0)  // compression
-      ..setUint8(11, 0)  // filter
-      ..setUint8(12, 0); // interlace
+      ..setUint8(8, 8)
+      ..setUint8(9, 6)
+      ..setUint8(10, 0)
+      ..setUint8(11, 0)
+      ..setUint8(12, 0);
     _writeChunk(bb, 'IHDR', ihdrData.buffer.asUint8List());
-
-    // IDAT Chunk
     _writeChunk(bb, 'IDAT', Uint8List.fromList(compressed));
-
-    // IEND Chunk
     _writeChunk(bb, 'IEND', Uint8List(0));
 
     return bb.toBytes();

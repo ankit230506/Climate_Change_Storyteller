@@ -1,5 +1,5 @@
 class AqiReading {
-  final String parameter; // pm25, pm10, no2, o3
+  final String parameter;
   final double value;
   final String unit;
   final String city;

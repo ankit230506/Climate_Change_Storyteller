@@ -40,4 +40,6 @@ enum ClimateEra {
         return 'Projection';
     }
   }
+
+  int get year => int.parse(label);
 }

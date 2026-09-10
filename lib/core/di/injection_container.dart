@@ -3,6 +3,8 @@ import 'package:climate_storyteller/features/climate_data/climate_data_service.d
 import 'package:climate_storyteller/features/narrator/narrator_service.dart';
 import 'package:climate_storyteller/core/localization/language_service.dart';
 import 'package:climate_storyteller/core/theme/theme_service.dart';
+import 'package:climate_storyteller/features/explore/custom_region_service.dart';
+import 'package:climate_storyteller/features/climate_data/climate_alert_service.dart';
 
 class DI {
   DI._();
@@ -18,4 +20,8 @@ class DI {
   static final languageService = LanguageService.instance;
 
   static final themeService = ThemeService.instance;
+
+  static final customRegionService = CustomRegionService.instance;
+
+  static final climateAlertService = ClimateAlertService.instance;
 }

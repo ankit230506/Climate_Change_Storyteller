@@ -37,23 +37,18 @@ class LGMapControllerWidget extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Zoom In
             _ControllerIconButton(
               icon: Icons.add,
               tooltip: 'Zoom In LG Rig',
               onPressed: onZoomIn,
             ),
             const SizedBox(height: 4),
-
-            // Zoom Out
             _ControllerIconButton(
               icon: Icons.remove,
               tooltip: 'Zoom Out LG Rig',
               onPressed: onZoomOut,
             ),
             const SizedBox(height: 4),
-
-            // Tilt 3D Toggle
             _ControllerIconButton(
               icon: is3DTilt ? Icons.threed_rotation : Icons.map_outlined,
               tooltip: is3DTilt ? 'Switch to 0° Overhead' : 'Switch to 45° 3D Tilt',
