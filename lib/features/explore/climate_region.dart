@@ -1,21 +1,23 @@
+import 'dart:convert';
 import 'climate_era.dart';
 
 /// A climate region that can be visualized on the LG rig.
 class ClimateRegion {
   final String id;
   final String name;
-  final String category; // glacier | sealevel | forest | heat | aqi
+  final String category;
   final double latitude;
   final double longitude;
   final double altitude;
-  final String? riskLevel; // Critical | High | Moderate
-  final Map<ClimateEra, String> kmlFiles; // era -> KML filename
+  final String? riskLevel;
+  final Map<ClimateEra, String> kmlFiles;
   final double bboxNorth;
   final double bboxSouth;
   final double bboxEast;
   final double bboxWest;
   final String imageUrl;
   final String description;
+  final bool isCustom;
 
   String get assetPath => 'assets/images/$id.png';
 
@@ -34,7 +36,87 @@ class ClimateRegion {
     required this.bboxWest,
     required this.imageUrl,
     required this.description,
+    this.isCustom = false,
   });
+
+  /// Generate default KML filenames for a custom region.
+  static Map<ClimateEra, String> generateKmlFiles(String id, String category) {
+    return {
+      for (final era in ClimateEra.values)
+        era: '${id}_${era.label}_$category.kml',
+    };
+  }
+
+  /// Generate default bounding box from coordinates (±2° spread).
+  static ({double n, double s, double e, double w}) defaultBbox(
+      double lat, double lng) {
+    return (
+      n: (lat + 2.0).clamp(-90.0, 90.0),
+      s: (lat - 2.0).clamp(-90.0, 90.0),
+      e: (lng + 2.0).clamp(-180.0, 180.0),
+      w: (lng - 2.0).clamp(-180.0, 180.0),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'category': category,
+        'latitude': latitude,
+        'longitude': longitude,
+        'altitude': altitude,
+        'riskLevel': riskLevel,
+        'kmlFiles': kmlFiles.map(
+          (era, file) => MapEntry(era.name, file),
+        ),
+        'bboxNorth': bboxNorth,
+        'bboxSouth': bboxSouth,
+        'bboxEast': bboxEast,
+        'bboxWest': bboxWest,
+        'imageUrl': imageUrl,
+        'description': description,
+        'isCustom': isCustom,
+      };
+
+  factory ClimateRegion.fromJson(Map<String, dynamic> json) {
+    final kmlMap = <ClimateEra, String>{};
+    final rawKml = json['kmlFiles'] as Map<String, dynamic>? ?? {};
+    for (final entry in rawKml.entries) {
+      final era = ClimateEra.values.firstWhere(
+        (e) => e.name == entry.key,
+        orElse: () => ClimateEra.present2026,
+      );
+      kmlMap[era] = entry.value as String;
+    }
+
+    return ClimateRegion(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      category: json['category'] as String,
+      latitude: (json['latitude'] as num).toDouble(),
+      longitude: (json['longitude'] as num).toDouble(),
+      altitude: (json['altitude'] as num).toDouble(),
+      riskLevel: json['riskLevel'] as String?,
+      kmlFiles: kmlMap,
+      bboxNorth: (json['bboxNorth'] as num).toDouble(),
+      bboxSouth: (json['bboxSouth'] as num).toDouble(),
+      bboxEast: (json['bboxEast'] as num).toDouble(),
+      bboxWest: (json['bboxWest'] as num).toDouble(),
+      imageUrl: json['imageUrl'] as String? ?? '',
+      description: json['description'] as String? ?? '',
+      isCustom: json['isCustom'] as bool? ?? true,
+    );
+  }
+
+  static String encodeList(List<ClimateRegion> regions) =>
+      jsonEncode(regions.map((r) => r.toJson()).toList());
+
+  static List<ClimateRegion> decodeList(String jsonStr) {
+    final list = jsonDecode(jsonStr) as List;
+    return list
+        .map((e) => ClimateRegion.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
 }
 
 /// Pre-defined regions matching the mockups.
@@ -45,7 +127,7 @@ const List<ClimateRegion> kDefaultRegions = [
     category: 'glacier',
     latitude: 78.2232,
     longitude: 15.6267,
-    altitude: 800000,
+    altitude: 350000,
     riskLevel: 'Critical',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'arctic_1900_glacier.kml',
@@ -158,9 +240,9 @@ const List<ClimateRegion> kDefaultRegions = [
     id: 'maldives',
     name: 'Maldives',
     category: 'sealevel',
-    latitude: 3.2028,
-    longitude: 73.2207,
-    altitude: 400000,
+    latitude: 3.4500,
+    longitude: 73.3000,
+    altitude: 780000,
     riskLevel: 'Critical',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'maldives_1900_sealevel.kml',
@@ -171,7 +253,7 @@ const List<ClimateRegion> kDefaultRegions = [
       ClimateEra.projected2100: 'maldives_2100_sealevel.kml',
     },
     bboxNorth: 8.0,
-    bboxSouth: -1.0,
+    bboxSouth: -1.2,
     bboxEast: 74.5,
     bboxWest: 72.0,
     imageUrl: 'https://images.unsplash.com/photo-1514282401047-d79a71a590e8?w=600&q=80',
@@ -183,7 +265,7 @@ const List<ClimateRegion> kDefaultRegions = [
     category: 'aqi',
     latitude: 28.6139,
     longitude: 77.2090,
-    altitude: 100000,
+    altitude: 350000,
     riskLevel: 'Critical',
     kmlFiles: {
       ClimateEra.preindustrial1900: 'delhi_1900_aqi.kml',

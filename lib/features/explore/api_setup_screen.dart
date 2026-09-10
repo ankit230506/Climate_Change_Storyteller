@@ -55,7 +55,6 @@ class _ApiSetupScreenState extends State<ApiSetupScreen> {
           padding: const EdgeInsets.all(20),
           child: Column(
             children: [
-              // Icon
               Container(
                 width: 64,
                 height: 64,
@@ -74,8 +73,6 @@ class _ApiSetupScreenState extends State<ApiSetupScreen> {
                 style: AppTypography.bodySmall.copyWith(color: colors.textSecondary),
               ),
               const SizedBox(height: 28),
-
-              // Required section
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text('REQUIRED', style: AppTypography.label.copyWith(color: colors.textMuted)),
@@ -108,8 +105,6 @@ class _ApiSetupScreenState extends State<ApiSetupScreen> {
                 },
               ),
               const SizedBox(height: 24),
-
-              // Free section
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text('FREE & OPEN SOURCE', style: AppTypography.label.copyWith(color: colors.textMuted)),
@@ -129,8 +124,6 @@ class _ApiSetupScreenState extends State<ApiSetupScreen> {
                 subtitle: 'Free tier · 38+ languages',
               ),
               const SizedBox(height: 16),
-
-              // Note
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(

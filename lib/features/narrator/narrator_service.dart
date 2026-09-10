@@ -63,19 +63,25 @@ class NarratorService {
       _pausedOffset = 0;
       _currentOffset = 0;
       _baseOffset = 0;
-      _speakCompleter?.complete();
+      if (_speakCompleter != null && !_speakCompleter!.isCompleted) {
+        _speakCompleter!.complete();
+      }
       _speakCompleter = null;
     });
 
     _tts.setErrorHandler((msg) {
       _stopProgressTimer();
-      _speakCompleter?.completeError(Exception('TTS error: $msg'));
+      if (_speakCompleter != null && !_speakCompleter!.isCompleted) {
+        _speakCompleter!.completeError(Exception('TTS error: $msg'));
+      }
       _speakCompleter = null;
     });
 
     _tts.setCancelHandler(() {
       _stopProgressTimer();
-      _speakCompleter?.complete();
+      if (_speakCompleter != null && !_speakCompleter!.isCompleted) {
+        _speakCompleter!.complete();
+      }
       _speakCompleter = null;
     });
 
@@ -171,8 +177,6 @@ class NarratorService {
     final initialProgress = _totalTextLength > 0 ? (_baseOffset / _totalTextLength) : 0.0;
     final remainingRatio = _totalTextLength > 0 ? ((_totalTextLength - _baseOffset) / _totalTextLength) : 1.0;
     _progressCtrl.add(initialProgress);
-
-    // Calculate estimated speaking duration to drive progress smooth fallback
     final wordCount = textToSpeak.trim().split(RegExp(r'\s+')).length;
     final wordsPerSec = switch (style) {
       VoiceStyle.poetic     => 1.85,

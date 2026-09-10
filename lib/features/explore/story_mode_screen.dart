@@ -186,12 +186,7 @@ class _StoryModeScreenState extends State<StoryModeScreen>
 
       if (!mounted) return;
       setState(() { _statusMsg = 'Speaking narration…'; _isLoading = false; });
-
-      // Speak using flutter_tts — await completion, progress bar is
-      // driven by the progressStream subscription set up in initState.
       await DI.narratorService.speak(narrationText, style: VoiceStyle.poetic);
-
-      // TTS completed — mark chapter done and auto-advance
       if (!mounted || !_isPlaying) return;
       setState(() {
         _chapterProgress = 1.0;

@@ -8,17 +8,16 @@ import 'package:climate_storyteller/core/constant/app_routes.dart';
 import 'package:climate_storyteller/features/explore/climate_region.dart';
 import 'package:climate_storyteller/core/di/injection_container.dart';
 
+import 'package:climate_storyteller/core/localization/language_service.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await DI.languageService.init();
   await DI.themeService.init();
-
-  // Lock to portrait orientation (smartphone controller)
+  await DI.customRegionService.init();
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
   ]);
-
-  // Set initial system overlay style
   _updateSystemOverlayStyle(DI.themeService.isDarkMode);
 
   runApp(const ClimateStorytellerApp());
@@ -45,14 +44,21 @@ class ClimateStorytellerApp extends StatelessWidget {
         final themeMode = snapshot.data ?? ThemeMode.light;
         _updateSystemOverlayStyle(DI.themeService.isDarkMode);
 
-        return MaterialApp(
-          title: 'Climate Storyteller',
-          debugShowCheckedModeBanner: false,
-          theme: AppTheme.light,
-          darkTheme: AppTheme.dark,
-          themeMode: themeMode,
-          initialRoute: AppRoutes.onboarding,
-          onGenerateRoute: _generateRoute,
+        return StreamBuilder<AppLanguage>(
+          stream: DI.languageService.languageStream,
+          initialData: DI.languageService.currentLanguage,
+          builder: (context, langSnapshot) {
+            return MaterialApp(
+              key: ValueKey('app_${langSnapshot.data?.code ?? "en"}'),
+              title: 'Climate Storyteller',
+              debugShowCheckedModeBanner: false,
+              theme: AppTheme.light,
+              darkTheme: AppTheme.dark,
+              themeMode: themeMode,
+              initialRoute: AppRoutes.onboarding,
+              onGenerateRoute: _generateRoute,
+            );
+          },
         );
       },
     );

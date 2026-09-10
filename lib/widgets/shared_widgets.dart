@@ -3,10 +3,8 @@ import 'package:climate_storyteller/core/constant/app_theme.dart';
 import 'package:climate_storyteller/core/di/injection_container.dart';
 import 'package:climate_storyteller/features/explore/climate_era.dart';
 import 'package:climate_storyteller/features/lg_connection/lg_rig_state.dart';
+import 'dart:ui';
 
-// ─────────────────────────────────────────────
-// Section Header
-// ─────────────────────────────────────────────
 
 class SectionHeader extends StatelessWidget {
   final String title;
@@ -31,10 +29,6 @@ class SectionHeader extends StatelessWidget {
     );
   }
 }
-
-// ─────────────────────────────────────────────
-// Status Pill
-// ─────────────────────────────────────────────
 
 class StatusPill extends StatelessWidget {
   final String label;
@@ -79,10 +73,6 @@ class StatusPill extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────
-// LG Connection Status Card
-// ─────────────────────────────────────────────
-
 class LGStatusCard extends StatelessWidget {
   final LGRigState rigState;
   final VoidCallback? onTap;
@@ -122,7 +112,9 @@ class LGStatusCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    isConnected ? 'LG Rig · Connected (port: ${rigState.webPort})' : 'LG Rig · Disconnected',
+                    isConnected
+                        ? '${DI.languageService.translate('lg_status_connected')} (port: ${rigState.webPort})'
+                        : DI.languageService.translate('lg_status_disconnected'),
                     style: AppTypography.bodySmall.copyWith(
                       color: colors.textPrimary,
                       fontWeight: FontWeight.w600,
@@ -196,9 +188,9 @@ class _ClearKmlIconButtonState extends State<_ClearKmlIconButton> {
               else
                 const Icon(Icons.delete_sweep, color: AppColors.critical, size: 16),
               const SizedBox(width: 4),
-              const Text(
-                'Clear KML',
-                style: TextStyle(
+              Text(
+                DI.languageService.translate('btn_clear_kml'),
+                style: const TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
                   color: AppColors.critical,
@@ -216,11 +208,11 @@ class _ClearKmlIconButtonState extends State<_ClearKmlIconButton> {
     try {
       await DI.lgService.clearKml();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Row(children: [
-            Icon(Icons.check_circle, color: Colors.white, size: 18),
-            SizedBox(width: 8),
-            Text('All KMLs removed from Liquid Galaxy in one go!'),
+            const Icon(Icons.check_circle, color: Colors.white, size: 18),
+            const SizedBox(width: 8),
+            Text(DI.languageService.translate('kml_cleared_msg')),
           ]),
           backgroundColor: AppColors.good,
         ));
@@ -301,10 +293,6 @@ class _PulsingDotState extends State<_PulsingDot>
   }
 }
 
-// ─────────────────────────────────────────────
-// Era Chip (1900 / 2026 / 2100)
-// ─────────────────────────────────────────────
-
 class EraChip extends StatelessWidget {
   final ClimateEra era;
   final bool isSelected;
@@ -348,10 +336,6 @@ class EraChip extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────
-// Category Filter Pills (All / Glaciers / Sea Level / Forests)
-// ─────────────────────────────────────────────
-
 class CategoryFilterBar extends StatelessWidget {
   final String selected;
   final ValueChanged<String> onChanged;
@@ -363,6 +347,15 @@ class CategoryFilterBar extends StatelessWidget {
     required this.selected,
     required this.onChanged,
   });
+
+  static String _categoryLabel(String cat) => switch (cat) {
+    'All' => DI.languageService.translate('cat_all'),
+    'Glaciers' => DI.languageService.translate('cat_glaciers'),
+    'Sea Level' => DI.languageService.translate('cat_sealevel'),
+    'Forests' => DI.languageService.translate('cat_forests'),
+    'Heat' => DI.languageService.translate('cat_heat'),
+    _ => cat,
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -389,7 +382,7 @@ class CategoryFilterBar extends StatelessWidget {
                 ),
               ),
               child: Text(
-                cat,
+                _categoryLabel(cat),
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: active ? FontWeight.w600 : FontWeight.w400,
@@ -403,10 +396,6 @@ class CategoryFilterBar extends StatelessWidget {
     );
   }
 }
-
-// ─────────────────────────────────────────────
-// Primary CTA Button
-// ─────────────────────────────────────────────
 
 class CTAButton extends StatelessWidget {
   final String label;
@@ -447,10 +436,6 @@ class CTAButton extends StatelessWidget {
     );
   }
 }
-
-// ─────────────────────────────────────────────
-// Stat Card
-// ─────────────────────────────────────────────
 
 class StatCard extends StatelessWidget {
   final String label;
@@ -502,6 +487,131 @@ class StatCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class GlassmorphicCard extends StatelessWidget {
+  final Widget child;
+  final EdgeInsets padding;
+  final double borderRadius;
+  final Color? borderColor;
+
+  const GlassmorphicCard({
+    super.key,
+    required this.child,
+    this.padding = const EdgeInsets.all(16.0),
+    this.borderRadius = 16.0,
+    this.borderColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(borderRadius),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          padding: padding,
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor.withValues(alpha: 0.2),
+            borderRadius: BorderRadius.circular(borderRadius),
+            border: Border.all(
+              color: borderColor ?? Colors.white.withValues(alpha: 0.2),
+            ),
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+class PulseIndicator extends StatefulWidget {
+  final Color color;
+  final double size;
+
+  const PulseIndicator({super.key, required this.color, this.size = 8.0});
+
+  @override
+  State<PulseIndicator> createState() => _PulseIndicatorState();
+}
+
+class _PulseIndicatorState extends State<PulseIndicator> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _scaleAnimation;
+  late Animation<double> _opacityAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat();
+    _scaleAnimation = Tween<double>(begin: 0.5, end: 1.5).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+    _opacityAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        FadeTransition(
+          opacity: _opacityAnimation,
+          child: ScaleTransition(
+            scale: _scaleAnimation,
+            child: Container(
+              width: widget.size,
+              height: widget.size,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: widget.color),
+            ),
+          ),
+        ),
+        Container(
+          width: widget.size * 0.8,
+          height: widget.size * 0.8,
+          decoration: BoxDecoration(shape: BoxShape.circle, color: widget.color),
+        ),
+      ],
+    );
+  }
+}
+
+class AnimatedMetricValue extends StatelessWidget {
+  final double value;
+  final String suffix;
+  final TextStyle? style;
+  final int decimals;
+
+  const AnimatedMetricValue({
+    super.key,
+    required this.value,
+    this.suffix = '',
+    this.style,
+    this.decimals = 1,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: value),
+      duration: const Duration(milliseconds: 800),
+      curve: Curves.easeOut,
+      builder: (context, val, _) {
+        return Text('${val.toStringAsFixed(decimals)}$suffix', style: style);
+      },
     );
   }
 }

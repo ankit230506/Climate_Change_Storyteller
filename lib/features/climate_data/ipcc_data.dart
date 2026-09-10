@@ -3,7 +3,6 @@
 /// These represent global means under SSP3-7.0 (middle-of-road scenario).
 library ipcc_data;
 
-// ── Temperature anomaly (°C relative to 1850-1900 baseline) ─────────────────
 const Map<int, double> kTemperatureAnomaly = {
   1900: 0.0,
   1950: 0.2,
@@ -17,7 +16,6 @@ const Map<int, double> kTemperatureAnomaly = {
   2100: 3.2,
 };
 
-// ── Arctic sea ice extent (million km²) ─────────────────────────────────────
 const Map<int, double> kArcticIceExtent = {
   1900: 12.5,
   1950: 11.8,
@@ -30,7 +28,6 @@ const Map<int, double> kArcticIceExtent = {
   2100: 1.1,
 };
 
-// ── Global mean sea level rise (mm relative to 1900) ────────────────────────
 const Map<int, double> kSeaLevelRise = {
   1900: 0,
   1950: 80,
@@ -43,7 +40,6 @@ const Map<int, double> kSeaLevelRise = {
   2100: 900,
 };
 
-// ── Global forest cover loss (% of 1900 baseline) ───────────────────────────
 const Map<int, double> kForestCoverLoss = {
   1900: 0,
   1950: 5.0,
@@ -56,26 +52,14 @@ const Map<int, double> kForestCoverLoss = {
   2100: 40.0,
 };
 
-// ── Regional data for app regions ───────────────────────────────────────────
 class IpccRegionData {
   final String regionId;
   final String name;
-  final Map<int, String> description; // era → narrative seed for Gemini
-
-  // Climate stats per era [1900, 2026, 2100]
+  final Map<int, String> description;
   final Map<int, double> localTempAnomaly;
-  final Map<int, double> iceExtentKm2;    // for glacier regions
-  final Map<int, double> seaLevelMm;      // for coastal regions
-  final Map<int, double> forestCoverPct;  // for forest regions
-  // US EPA AQI scale (0-500) for AQI regions. Unlike the fields above, this
-  // is NOT sourced from an IPCC scenario — the IPCC does not publish
-  // city-level air quality index projections, since AQI is driven mainly by
-  // local pollution policy/emissions controls, not global climate forcing.
-  // The 1900 and 2026 values here are real/well-documented; the 2100 value
-  // is explicitly an illustrative "if current trends continue unchecked"
-  // scenario, not an official projection — see the source line this feeds
-  // into in lg_service.dart, which reflects that distinction rather than
-  // mislabeling it as "IPCC AR6" like the other categories.
+  final Map<int, double> iceExtentKm2;
+  final Map<int, double> seaLevelMm;
+  final Map<int, double> forestCoverPct;
   final Map<int, double> aqiIndex;
 
   const IpccRegionData({

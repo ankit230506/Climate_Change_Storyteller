@@ -14,7 +14,6 @@ class SecureStorageService {
     ),
   );
 
-  // ── Key names ────────────────────────────────────────────────────────────
   static const _kGeminiKey = 'gemini_api_key';
   static const _kNoaaKey   = 'noaa_api_key';
   static const _kLgIp      = 'lg_ip';
@@ -26,19 +25,16 @@ class SecureStorageService {
   static const _kLanguageCode = 'app_language_code';
   static const _kThemeMode    = 'app_theme_mode';
 
-  // ── Language Settings ───────────────────────────────────────────────────
   Future<void> saveLanguageCode(String code) =>
       _storage.write(key: _kLanguageCode, value: code);
 
   Future<String?> getLanguageCode() => _storage.read(key: _kLanguageCode);
 
-  // ── Theme Settings ──────────────────────────────────────────────────────
   Future<void> saveThemeMode(String mode) =>
       _storage.write(key: _kThemeMode, value: mode);
 
   Future<String?> getThemeMode() => _storage.read(key: _kThemeMode);
 
-  // ── Gemini API key (required) ────────────────────────────────────────────
   Future<void> saveGeminiKey(String key) async {
     try {
       await _storage.write(key: _kGeminiKey, value: key.trim());
@@ -69,7 +65,6 @@ class SecureStorageService {
     }
   }
 
-  // ── NOAA API key (optional — free, register at ncei.noaa.gov) ───────────
   Future<void> saveNoaaKey(String key) =>
       _storage.write(key: _kNoaaKey, value: key.trim());
 
@@ -77,7 +72,6 @@ class SecureStorageService {
 
   Future<void> deleteNoaaKey() => _storage.delete(key: _kNoaaKey);
 
-  // ── LG rig connection details ────────────────────────────────────────────
   Future<void> saveLgCredentials({
     required String ip,
     required int port,

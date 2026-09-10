@@ -16,6 +16,8 @@ import 'package:climate_storyteller/core/storage/secure_storage_service.dart';
 import 'package:climate_storyteller/features/explore/climate_era.dart';
 import 'package:climate_storyteller/features/lg_connection/lg_overlays.dart';
 import 'package:climate_storyteller/features/lg_connection/lg_rig_state.dart';
+import 'package:climate_storyteller/features/explore/add_region_screen.dart';
+import 'package:climate_storyteller/features/explore/custom_region_service.dart';
 
 class ExploreScreen extends StatefulWidget {
   const ExploreScreen({super.key});
@@ -34,6 +36,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
   bool _isLoadingKml = false;
   bool _isProgrammaticMove = false;
   StreamSubscription<LgViewpoint>? _vpSub;
+  StreamSubscription<List<ClimateRegion>>? _customRegionsSub;
 
   bool _isNarrating = false;
   bool _isNarrationLoading = false;
@@ -52,11 +55,16 @@ class _ExploreScreenState extends State<ExploreScreen> {
         });
       }
     });
+
+    _customRegionsSub = CustomRegionService.instance.regionsStream.listen((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
   void dispose() {
     _vpSub?.cancel();
+    _customRegionsSub?.cancel();
     DI.lgService.stopLgViewpointPolling();
     DI.narratorService.stop();
     super.dispose();
@@ -113,18 +121,20 @@ class _ExploreScreenState extends State<ExploreScreen> {
     }
   }
 
-  static const _cats = ['All','Glaciers','Sea Level','Forests','Heat'];
+  static const _cats = ['All','Glaciers','Sea Level','Forests','Heat', 'AQI'];
 
   List<ClimateRegion> get _filtered {
-    if (_category == 'All') return kDefaultRegions;
+    final allRegions = [...kDefaultRegions, ...CustomRegionService.instance.customRegions];
+    if (_category == 'All') return allRegions;
     final cat = switch (_category) {
       'Glaciers'  => 'glacier',
       'Sea Level' => 'sealevel',
       'Forests'   => 'forest',
       'Heat'      => 'heat',
+      'AQI'       => 'aqi',
       _           => '',
     };
-    return kDefaultRegions.where((r) => r.category == cat).toList();
+    return allRegions.where((r) => r.category == cat).toList();
   }
 
   Color _catColor(String c) => switch (c) {
@@ -132,6 +142,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
     'sealevel' => AppColors.seaLevel,
     'forest'   => AppColors.forest,
     'heat'     => AppColors.warning,
+    'aqi'      => AppColors.critical,
     _          => AppColors.textSecondary,
   };
 
@@ -140,6 +151,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
     'sealevel' => Icons.water,
     'forest'   => Icons.forest,
     'heat'     => Icons.thermostat,
+    'aqi'      => Icons.air,
     _          => Icons.place,
   };
 
@@ -520,17 +532,12 @@ class _ExploreScreenState extends State<ExploreScreen> {
     lg.stopOrbit();
     setState(() => _isLoadingKml = true);
     try {
-      // 1. Fly to target region coordinate FIRST so Google Earth camera reaches destination
       await lg.flyTo(
         latitude: region.latitude,
         longitude: region.longitude,
         altitude: region.altitude,
       );
-
-      // 2. Wait for Google Earth's flight to reach desired coordinate
       await Future.delayed(const Duration(milliseconds: 2500));
-
-      // 3. Build & upload KML for the region onto LG (KML loads)
       final kmlPath = await lg.buildKmlForYear(
         region: region,
         year: year,
@@ -545,8 +552,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
         longitude: region.longitude,
         altitude: region.altitude,
       );
-
-      // 4. Set KML loading as completed once KML is sent to LG
       if (mounted) {
         setState(() => _isLoadingKml = false);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -567,12 +572,20 @@ class _ExploreScreenState extends State<ExploreScreen> {
     final colors = AppColors.of(context);
     return Scaffold(
       backgroundColor: colors.bg0,
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const AddRegionScreen()),
+          );
+        },
+        backgroundColor: AppColors.primary,
+        child: const Icon(Icons.add_location_alt, color: Colors.white),
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Header ──────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
                 child: Column(
@@ -585,8 +598,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-
-              // ── Category filters ─────────────────────────────────────
               SizedBox(
                 height: 38,
                 child: ListView(
@@ -627,8 +638,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-
-              // ── Map view container ───────────────────────────────────
               Container(
                 height: 250,
                 margin: const EdgeInsets.symmetric(horizontal: 20),
@@ -689,8 +698,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-
-              // ── Active Selected Region Card (Full Width with Tap-to-Enlarge Image) ──
               if (_selected != null)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -707,7 +714,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Tap image thumbnail to view full-screen enlarge modal!
                             GestureDetector(
                               onTap: () => _showEnlargedImage(context, _selected!),
                               child: Stack(
@@ -799,8 +805,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
                   ),
                 ),
               const SizedBox(height: 14),
-
-              // ── Spacious Full-Width Time Slider Card ─────────────────────────
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Container(
@@ -918,8 +922,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 ),
               ),
               const SizedBox(height: 20),
-
-              // ── Bottom Section: 2-Block Horizontal Layout (Settings-Style) of Climate Regions ──
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Text('CLIMATE REGIONS', style: AppTypography.label.copyWith(color: colors.textMuted)),
@@ -1016,8 +1018,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
     );
   }
 }
-
-// ── Proper map pin widget ─────────────────────────────────────────────────────
 class _MapPin extends StatelessWidget {
   final Color    color;
   final IconData icon;
@@ -1036,7 +1036,6 @@ class _MapPin extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Label above pin (only when selected)
         if (isSelected)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -1053,8 +1052,6 @@ class _MapPin extends StatelessWidget {
               ),
             ),
           ),
-
-        // Pin head (circle with icon)
         AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           width:  isSelected ? 36 : 30,
@@ -1074,8 +1071,6 @@ class _MapPin extends StatelessWidget {
           child: Icon(icon, color: Colors.white,
               size: isSelected ? 18 : 14),
         ),
-
-        // Pin tail (triangle pointer)
         CustomPaint(
           size: const Size(10, 6),
           painter: _PinTailPainter(color: color),

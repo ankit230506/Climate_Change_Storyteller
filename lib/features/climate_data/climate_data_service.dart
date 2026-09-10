@@ -19,8 +19,6 @@ class ClimateDataService {
   final LgService lgService;
 
   ClimateDataService({required this.lgService});
-
-  // Cached remote data for OpenAQ / NOAA
   final Map<String, _CachedDouble> _climateCache = {};
   final Map<String, _CachedAqi> _aqiCache = {};
 
@@ -111,51 +109,40 @@ class ClimateDataService {
 
 
   Future<ClimateStats> getStatsForYear(int year, {String? noaaKey}) async {
-    if (year <= 1900) {
+    if (year != 2026 && year != DateTime.now().year) {
       return ClimateStats(
-        year: 1900,
-        tempAnomaly: getInterpolatedTemperature(1900),
-        seaLevelMm: getInterpolatedSeaLevel(1900),
-        iceExtentMkm2: getInterpolatedIceExtent(1900),
-        forestLossPct: getInterpolatedForestLoss(1900),
-        source: 'IPCC AR6 historical baseline',
+        year: year,
+        tempAnomaly: getInterpolatedTemperature(year),
+        seaLevelMm: getInterpolatedSeaLevel(year),
+        iceExtentMkm2: getInterpolatedIceExtent(year),
+        forestLossPct: getInterpolatedForestLoss(year),
+        source: year < 2026 ? 'IPCC AR6 historical baseline' : 'IPCC AR6 SSP3-7.0 projection',
       );
     }
 
-    if (year >= 2100) {
-      return ClimateStats(
-        year: 2100,
-        tempAnomaly: getInterpolatedTemperature(2100),
-        seaLevelMm: getInterpolatedSeaLevel(2100),
-        iceExtentMkm2: getInterpolatedIceExtent(2100),
-        forestLossPct: getInterpolatedForestLoss(2100),
-        source: 'IPCC AR6 SSP3-7.0 projection',
-      );
-    }
+    double tempAnomaly = getInterpolatedTemperature(year);
+    double seaLevelMm = getInterpolatedSeaLevel(year);
+    double iceExtentMkm2 = getInterpolatedIceExtent(year);
 
-    double tempAnomaly;
-    double seaLevelMm;
-    double iceExtentMkm2;
+    final results = await Future.wait([
+      _fetchRemoteTempAnomaly(noaaApiKey: noaaKey)
+          .timeout(const Duration(seconds: 3), onTimeout: () => tempAnomaly)
+          .catchError((_) => tempAnomaly),
+      _fetchRemoteSeaLevel()
+          .timeout(const Duration(seconds: 3), onTimeout: () => 0.0)
+          .catchError((_) => 0.0),
+      _fetchRemoteArcticIceExtent()
+          .timeout(const Duration(seconds: 3), onTimeout: () => iceExtentMkm2)
+          .catchError((_) => iceExtentMkm2),
+    ]);
 
-    try {
-      tempAnomaly = await _fetchRemoteTempAnomaly(noaaApiKey: noaaKey);
-    } catch (_) {
-      tempAnomaly = getInterpolatedTemperature(year);
-    }
-
-    try {
-      final msl = await _fetchRemoteSeaLevel();
+    tempAnomaly = results[0];
+    final msl = results[1];
+    if (msl != 0.0) {
       final baseline1900 = getInterpolatedSeaLevel(1900);
       seaLevelMm = baseline1900 + msl;
-    } catch (_) {
-      seaLevelMm = getInterpolatedSeaLevel(year);
     }
-
-    try {
-      iceExtentMkm2 = await _fetchRemoteArcticIceExtent();
-    } catch (_) {
-      iceExtentMkm2 = getInterpolatedIceExtent(year);
-    }
+    iceExtentMkm2 = results[2];
 
     final forestLossPct = getInterpolatedForestLoss(year);
 
@@ -216,19 +203,15 @@ class ClimateDataService {
       if (r.parameter == 'no2') no2 = r.value;
       if (r.parameter == 'o3') o3 = r.value;
     }
-    
-    // Scale the rings based on PM2.5 severity
     final severityScale = (pm25 / 100.0).clamp(0.5, 2.0);
-    final baseRadius = 0.05 * severityScale; // ~5km base radius
-
-    // 5 concentric rings (Good -> Hazardous)
+    final baseRadius = 0.05 * severityScale;
     final rings = StringBuffer();
     final colors = [
-      '8833cc44', // Good (Green)
-      '8855ddaa', // Moderate (Yellow)
-      '880088ff', // Unhealthy (Orange)
-      '880000ff', // Very Unhealthy (Red)
-      '88990099', // Hazardous (Purple)
+      '8833cc44',
+      '8855ddaa',
+      '880088ff',
+      '880000ff',
+      '88990099',
     ];
     
     final ringStyles = StringBuffer();
@@ -241,7 +224,7 @@ class ClimateDataService {
     }
 
     for (int i = 0; i < 5; i++) {
-      final radius = baseRadius * (5 - i); // Largest first
+      final radius = baseRadius * (5 - i);
       final points = <String>[];
       for (int a = 0; a <= 32; a++) {
         final angle = a * (3.14159 * 2) / 32;
@@ -263,16 +246,12 @@ class ClimateDataService {
       </Placemark>''');
     }
 
-    final projectedPm25 = pm25 * 1.5; // simple projection for demo
-
-    // Health Advice Badge
+    final projectedPm25 = pm25 * 1.5;
     final healthBadge = pm25 <= 15
         ? "<span style='background:#2ecc71;color:#fff;padding:3px 8px;border-radius:10px;'>🟢 LOW RISK</span>"
         : (pm25 <= 50
             ? "<span style='background:#f1c40f;color:#000;padding:3px 8px;border-radius:10px;'>🟡 MODERATE SENSITIVITY</span>"
             : "<span style='background:#e74c3c;color:#fff;padding:3px 8px;border-radius:10px;'>🔴 HAZARDOUS HEALTH ADVISORY</span>");
-
-    // City Sub-Stations & 3D Sensor Beacons
     final subStations = [
       {'name': '$city Urban Center Station', 'dLat': 0.03, 'dLon': -0.04, 'val': pm25 * 1.1},
       {'name': '$city Industrial Outer Ring Post', 'dLat': -0.05, 'dLon': 0.06, 'val': pm25 * 1.3},
@@ -286,8 +265,6 @@ class ClimateDataService {
       final stLon = lon + (st['dLon'] as double);
       final stName = st['name'] as String;
       final stVal = st['val'] as double;
-
-      // 3D Elevated Beacon Spire for sub-station
       stationPlacemarks.writeln(LG3DVisuals.build3DSensorBeacon(
         centerLat: stLat,
         centerLon: stLon,
@@ -297,8 +274,6 @@ class ClimateDataService {
         name: '$stName 3D Beacon',
         description: 'Atmospheric Sensor Monitoring Point',
       ));
-
-      // 3D Elevated Telemetry Corridor linking sub-station to urban core
       stationPlacemarks.writeln(LG3DVisuals.build3DConnectingCorridor(
         fromLat: stLat,
         fromLon: stLon,
@@ -335,8 +310,6 @@ class ClimateDataService {
         </Point>
       </Placemark>''');
     }
-
-    // 3D City Center Smog Pillar
     final aqiPillarHeight = (pm25 * 300.0).clamp(12000.0, 48000.0);
     final aqiColor = pm25 <= 15
         ? 'aa33cc44'
@@ -509,7 +482,7 @@ class ClimateDataService {
     final centerLon = (bbox.east + bbox.west) / 2;
 
     final lossYears = (year - 2000).clamp(1, 100);
-    final estimatedEmissionsMt = lossYears * 145.0; // Million tonnes CO2 estimate
+    final estimatedEmissionsMt = lossYears * 145.0;
 
     final forestImageUrl = switch (regionId.toLowerCase()) {
       'amazon' => 'https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?w=600&q=80',
@@ -554,7 +527,7 @@ class ClimateDataService {
     <!-- ScreenOverlays (logo + legend) are injected per-screen by sendKml() -->
 
     <!-- Existing tree canopy (green layer, bottom) -->
-    <GroundOverlay>
+    ${canopyUrl.isNotEmpty ? '''<GroundOverlay>
       <name>Tree Cover 2000 (baseline)</name>
       <color>99ffffff</color>
       <drawOrder>1</drawOrder>
@@ -568,10 +541,10 @@ class ClimateDataService {
         <east>${bbox.east}</east>
         <west>${bbox.west}</west>
       </LatLonBox>
-    </GroundOverlay>
+    </GroundOverlay>''' : ''}
 
     <!-- Forest loss overlay (red layer, top) -->
-    <GroundOverlay>
+    ${tileUrl.isNotEmpty ? '''<GroundOverlay>
       <name>Tree Cover Loss 2000–$year</name>
       <color>ccffffff</color>
       <drawOrder>2</drawOrder>
@@ -585,7 +558,7 @@ class ClimateDataService {
         <east>${bbox.east}</east>
         <west>${bbox.west}</west>
       </LatLonBox>
-    </GroundOverlay>
+    </GroundOverlay>''' : ''}
 
     <!-- Region boundary outline -->
     <Placemark>
@@ -704,7 +677,7 @@ class ClimateDataService {
     </Style>
 
     <!-- 2000 baseline — left half -->
-    <GroundOverlay>
+    ${canopyUrl.isNotEmpty ? '''<GroundOverlay>
       <name>Forest Cover 2000</name>
       <drawOrder>1</drawOrder>
       <Icon><href>$canopyUrl</href></Icon>
@@ -714,10 +687,10 @@ class ClimateDataService {
         <east>$midLon</east>
         <west>${bbox.west}</west>
       </LatLonBox>
-    </GroundOverlay>
+    </GroundOverlay>''' : ''}
 
     <!-- 2023 loss — right half -->
-    <GroundOverlay>
+    ${lossUrl.isNotEmpty ? '''<GroundOverlay>
       <name>Forest Loss 2000–2023</name>
       <drawOrder>2</drawOrder>
       <Icon><href>$lossUrl</href></Icon>
@@ -727,7 +700,7 @@ class ClimateDataService {
         <east>${bbox.east}</east>
         <west>$midLon</west>
       </LatLonBox>
-    </GroundOverlay>
+    </GroundOverlay>''' : ''}
 
     <!-- Dividing line -->
     <Placemark>
@@ -799,8 +772,6 @@ class ClimateDataService {
       final sLon = centerLon + (s['dLon'] as double);
       final sName = s['name'] as String;
       final clearYear = s['clearYear'] as int;
-
-      // Only render if still standing in this year. If cleared, it completely vanishes!
       if (year <= clearYear) {
         sb.writeln(LG3DVisuals.build3DHexagonalPrism(
           centerLat: sLat,
@@ -979,12 +950,12 @@ class ClimateDataService {
   }
 
   String _buildGfwUrl(BBox bbox, int year) {
-    final url = 'http://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?'
+    final url = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?'
         'SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1'
         '&LAYERS=MODIS_Terra_NDVI_8Day'
         '&SRS=EPSG:4326'
         '&FORMAT=image/png'
-        '&WIDTH=1024&HEIGHT=1024'
+        '&WIDTH=512&HEIGHT=512'
         '&BBOX=${bbox.west},${bbox.south},${bbox.east},${bbox.north}'
         '&TRANSPARENT=TRUE'
         '&TIME=2023-06-01';
@@ -992,12 +963,12 @@ class ClimateDataService {
   }
 
   String _buildCanopyUrl(BBox bbox) {
-    final url = 'http://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?'
+    final url = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?'
         'SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1'
         '&LAYERS=MODIS_Terra_NDSI_Snow_Cover'
         '&SRS=EPSG:4326'
         '&FORMAT=image/png'
-        '&WIDTH=1024&HEIGHT=1024'
+        '&WIDTH=512&HEIGHT=512'
         '&BBOX=${bbox.west},${bbox.south},${bbox.east},${bbox.north}'
         '&TRANSPARENT=TRUE'
         '&TIME=2023-06-01';

@@ -39,26 +39,18 @@ void main() {
 </kml>''';
 
       final lg = LgService();
-      
-      // 1. Master Content (lg1): Time Slider ONLY. 0 Logo, 0 Balloon.
       final sceneOnly = lg.stripScreenOverlaysForTest(sampleKml);
       final masterContent = lg.stripBalloonVisibilityForTest(sceneOnly);
       expect(masterContent.contains('<ScreenOverlay>'), isFalse, reason: 'Master lg1 must have 0 logo');
       expect(masterContent.contains('<gx:balloonVisibility>1</gx:balloonVisibility>'), isFalse, reason: 'Master lg1 must have 0 balloon popup');
       expect(masterContent.contains('<gx:TimeStamp>'), isTrue, reason: 'Master lg1 MUST retain Time Slider');
-
-      // 2. Leftmost Content (lg5): Logo ONLY. 0 Time Slider, 0 Balloon.
       final leftContent = lg.stripBalloonVisibilityForTest(lg.stripTimeSpansForTest(sceneOnly));
       expect(leftContent.contains('<gx:TimeStamp>'), isFalse, reason: 'Leftmost must have 0 time slider');
       expect(leftContent.contains('<gx:balloonVisibility>1</gx:balloonVisibility>'), isFalse, reason: 'Leftmost must have 0 balloon popup');
-
-      // 3. Rightmost Content (lg4): Balloon ONLY. 0 Logo, 0 Time Slider.
       final rightContent = lg.ensureBalloonVisibilityForTest(lg.stripTimeSpansForTest(sceneOnly));
       expect(rightContent.contains('<gx:balloonVisibility>1</gx:balloonVisibility>'), isTrue, reason: 'Rightmost MUST retain Balloon popup');
       expect(rightContent.contains('<ScreenOverlay>'), isFalse, reason: 'Rightmost must have 0 logo');
       expect(rightContent.contains('<gx:TimeStamp>'), isFalse, reason: 'Rightmost must have 0 time slider');
-
-      // 4. Middle Slave Content: Pure 3D Earth scene. 0 Logo, 0 Time Slider, 0 Balloon.
       final slaveContent = lg.stripBalloonVisibilityForTest(lg.stripTimeSpansForTest(sceneOnly));
       expect(slaveContent.contains('<ScreenOverlay>'), isFalse);
       expect(slaveContent.contains('<gx:TimeStamp>'), isFalse);

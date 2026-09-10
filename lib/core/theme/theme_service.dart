@@ -36,8 +36,6 @@ enum AppThemeMode {
 class ThemeService {
   ThemeService._();
   static final ThemeService instance = ThemeService._();
-
-  // Default to Light mode per user request
   AppThemeMode _currentMode = AppThemeMode.light;
   final _streamCtrl = StreamController<ThemeMode>.broadcast();
 
@@ -48,7 +46,6 @@ class ThemeService {
   bool get isDarkMode {
     if (_currentMode == AppThemeMode.dark) return true;
     if (_currentMode == AppThemeMode.light) return false;
-    // system mode fallback
     final platformBrightness = WidgetsBinding.instance.platformDispatcher.platformBrightness;
     return platformBrightness == Brightness.dark;
   }

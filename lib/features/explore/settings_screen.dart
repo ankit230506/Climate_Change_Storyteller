@@ -13,6 +13,57 @@ import 'package:climate_storyteller/core/theme/theme_service.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
+  Future<void> _runWithLoadingDialog<T>(
+    BuildContext context, {
+    required String loadingMsg,
+    required Future<T> Function() task,
+    required void Function(BuildContext ctx, T result) onSuccess,
+  }) async {
+    final colors = AppColors.of(context);
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => Center(
+        child: Card(
+          color: colors.bg1,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CircularProgressIndicator(),
+                const SizedBox(width: 16),
+                Text(loadingMsg, style: TextStyle(color: colors.textPrimary)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    try {
+      final result = await task();
+      if (!context.mounted) return;
+      Navigator.pop(context);
+      onSuccess(context, result);
+    } catch (e) {
+      if (!context.mounted) return;
+      Navigator.pop(context);
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          backgroundColor: colors.bg1,
+          title: Text('Failed', style: TextStyle(color: colors.textPrimary)),
+          content: Text(e.toString(), style: TextStyle(color: colors.textPrimary)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
 
   void _runDiagnostics(BuildContext context) {
     final colors = AppColors.of(context);
@@ -23,89 +74,48 @@ class SettingsScreen extends StatelessWidget {
       ));
       return;
     }
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => Center(
-        child: Card(
-          color: colors.bg1,
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const CircularProgressIndicator(),
-                const SizedBox(width: 16),
-                Text('Running Diagnostics...', style: TextStyle(color: colors.textPrimary)),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-
-    DI.lgService.runDiagnostics().then((result) {
-      if (!context.mounted) return;
-      Navigator.pop(context); // Dismiss loading dialog
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          backgroundColor: colors.bg1,
-          title: Text('LG Rig Diagnostic Report', style: TextStyle(color: colors.textPrimary)),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: SingleChildScrollView(
-              child: SelectableText(
-                result,
-                style: TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 12,
-                  color: colors.textPrimary,
+    _runWithLoadingDialog<String>(
+      context,
+      loadingMsg: 'Running Diagnostics...',
+      task: DI.lgService.runDiagnostics,
+      onSuccess: (ctx, result) {
+        showDialog(
+          context: ctx,
+          builder: (_) => AlertDialog(
+            backgroundColor: colors.bg1,
+            title: Text('LG Rig Diagnostic Report', style: TextStyle(color: colors.textPrimary)),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: SingleChildScrollView(
+                child: SelectableText(
+                  result,
+                  style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: colors.textPrimary),
                 ),
               ),
             ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: result));
+                  ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                    content: Text('Copied report to clipboard!'),
+                    backgroundColor: AppColors.primary,
+                  ));
+                },
+                child: const Text('Copy Report'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Close'),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: result));
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text('Copied report to clipboard!'),
-                  backgroundColor: AppColors.primary,
-                ));
-              },
-              child: const Text('Copy Report'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Close'),
-            ),
-          ],
-        ),
-      );
-    }).catchError((e) {
-      if (!context.mounted) return;
-      Navigator.pop(context); // Dismiss loading dialog
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          backgroundColor: colors.bg1,
-          title: Text('Diagnostics Failed', style: TextStyle(color: colors.textPrimary)),
-          content: Text(e.toString(), style: TextStyle(color: colors.textPrimary)),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Close'),
-            ),
-          ],
-        ),
-      );
-    });
+        );
+      },
+    );
   }
 
   void _setupNetworkLink(BuildContext context) {
-    final colors = AppColors.of(context);
     if (!DI.lgService.state.isConnected) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Not connected to LG Rig — connect first'),
@@ -113,53 +123,15 @@ class SettingsScreen extends StatelessWidget {
       ));
       return;
     }
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => Center(
-        child: Card(
-          color: colors.bg1,
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const CircularProgressIndicator(),
-                const SizedBox(width: 16),
-                Text('Configuring NetworkLink...', style: TextStyle(color: colors.textPrimary)),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-
-    DI.lgService.setupNetworkLink().then((_) {
-      if (!context.mounted) return;
-      Navigator.pop(context); // Dismiss loading dialog
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+    _runWithLoadingDialog<void>(
+      context,
+      loadingMsg: 'Configuring NetworkLink...',
+      task: DI.lgService.setupNetworkLink,
+      onSuccess: (ctx, _) => ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
         content: Text('NetworkLink configured and Google Earth relaunched!'),
         backgroundColor: AppColors.good,
-      ));
-    }).catchError((e) {
-      if (!context.mounted) return;
-      Navigator.pop(context); // Dismiss loading dialog
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          backgroundColor: colors.bg1,
-          title: Text('Setup Failed', style: TextStyle(color: colors.textPrimary)),
-          content: Text(e.toString(), style: TextStyle(color: colors.textPrimary)),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Close'),
-            ),
-          ],
-        ),
-      );
-    });
+      )),
+    );
   }
 
   void _openConnect(BuildContext context) {
@@ -183,7 +155,6 @@ class SettingsScreen extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               const SizedBox(height: 12),
-              // Drag handle
               Container(
                 width: 40,
                 height: 4,
@@ -279,7 +250,7 @@ class SettingsScreen extends StatelessWidget {
                         fontWeight: currentMode == AppThemeMode.light ? FontWeight.bold : FontWeight.normal,
                       ),
                     ),
-                    subtitle: Text('Clean light mode', style: TextStyle(fontSize: 12, color: colors.textSecondary)),
+                    subtitle: Text(DI.languageService.translate('theme_light_sub'), style: TextStyle(fontSize: 12, color: colors.textSecondary)),
                     trailing: currentMode == AppThemeMode.light ? const Icon(Icons.check_circle, color: AppColors.primary) : null,
                     onTap: () {
                       DI.themeService.setThemeMode(AppThemeMode.light);
@@ -295,7 +266,7 @@ class SettingsScreen extends StatelessWidget {
                         fontWeight: currentMode == AppThemeMode.dark ? FontWeight.bold : FontWeight.normal,
                       ),
                     ),
-                    subtitle: Text('Default dark mode', style: TextStyle(fontSize: 12, color: colors.textSecondary)),
+                    subtitle: Text(DI.languageService.translate('theme_dark_sub'), style: TextStyle(fontSize: 12, color: colors.textSecondary)),
                     trailing: currentMode == AppThemeMode.dark ? const Icon(Icons.check_circle, color: AppColors.primary) : null,
                     onTap: () {
                       DI.themeService.setThemeMode(AppThemeMode.dark);
@@ -311,7 +282,7 @@ class SettingsScreen extends StatelessWidget {
                         fontWeight: currentMode == AppThemeMode.system ? FontWeight.bold : FontWeight.normal,
                       ),
                     ),
-                    subtitle: Text('Match system settings', style: TextStyle(fontSize: 12, color: colors.textSecondary)),
+                    subtitle: Text(DI.languageService.translate('theme_system_sub'), style: TextStyle(fontSize: 12, color: colors.textSecondary)),
                     trailing: currentMode == AppThemeMode.system ? const Icon(Icons.check_circle, color: AppColors.primary) : null,
                     onTap: () {
                       DI.themeService.setThemeMode(AppThemeMode.system);
@@ -704,11 +675,14 @@ class SettingsScreen extends StatelessWidget {
             color: colors.textSecondary,
           ),
         ),
-        const Spacer(),
-        Text(
-          value,
-          style: AppTypography.bodySmall.copyWith(
-            color: colors.textPrimary,
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            value,
+            textAlign: TextAlign.end,
+            style: AppTypography.bodySmall.copyWith(
+              color: colors.textPrimary,
+            ),
           ),
         ),
       ],
@@ -738,12 +712,11 @@ class SettingsScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Configure Liquid Galaxy connection, themes & options',
+                    DI.languageService.translate('settings_sub'),
                     style: AppTypography.bodySmall.copyWith(color: colors.textSecondary),
                   ),
                   const SizedBox(height: 24),
 
-                  // ── Block 1: Liquid Galaxy Connection ──────────────────────────
                   StreamBuilder<LGRigState>(
                     stream: DI.lgService.stateStream,
                     initialData: DI.lgService.state,
@@ -813,14 +786,13 @@ class SettingsScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 24),
 
-                  // ── Section 2: Liquid Galaxy Actions (2 Horizontal Cards) ──
-                  const SectionHeader(title: 'LIQUID GALAXY ACTIONS'),
+                  SectionHeader(title: DI.languageService.translate('sec_lg_actions')),
                   Row(
                     children: [
                       _GridActionCard(
                         icon: Icons.sync,
-                        title: 'Set up NetworkLink',
-                        subtitle: 'Fix Google Earth sync',
+                        title: DI.languageService.translate('tile_networklink'),
+                        subtitle: DI.languageService.translate('tile_networklink_sub'),
                         accentColor: AppColors.primary,
                         onTap: () => _setupNetworkLink(context),
                       ),
@@ -828,7 +800,7 @@ class SettingsScreen extends StatelessWidget {
                       _GridActionCard(
                         icon: Icons.build_circle_outlined,
                         title: DI.languageService.translate('tile_lg_diagnostics'),
-                        subtitle: 'System & port check',
+                        subtitle: DI.languageService.translate('tile_lg_diagnostics_sub'),
                         accentColor: AppColors.secondary,
                         onTap: () => _runDiagnostics(context),
                       ),
@@ -836,7 +808,6 @@ class SettingsScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 20),
 
-                  // ── Section 3: App Preferences (2 Horizontal Cards) ──
                   SectionHeader(title: DI.languageService.translate('sec_application')),
                   Row(
                     children: [
@@ -863,14 +834,13 @@ class SettingsScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 20),
 
-                  // ── Section 4: Data & Cache (2 Horizontal Cards) ──
-                  const SectionHeader(title: 'DATA & STORAGE'),
+                  SectionHeader(title: DI.languageService.translate('sec_data_storage')),
                   Row(
                     children: [
                       _GridActionCard(
                         icon: Icons.folder_outlined,
                         title: DI.languageService.translate('tile_kml_cache'),
-                        subtitle: 'Pre-load KML datasets',
+                        subtitle: DI.languageService.translate('tile_kml_cache_sub'),
                         accentColor: AppColors.glacier,
                         onTap: () => Navigator.push(
                           context,
@@ -881,7 +851,7 @@ class SettingsScreen extends StatelessWidget {
                       _GridActionCard(
                         icon: Icons.vpn_key_outlined,
                         title: DI.languageService.translate('tile_api_setup'),
-                        subtitle: 'Gemini AI & NOAA keys',
+                        subtitle: DI.languageService.translate('tile_api_setup_sub'),
                         accentColor: AppColors.warning,
                         onTap: () => Navigator.push(
                           context,
@@ -892,21 +862,20 @@ class SettingsScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 20),
 
-                  // ── Section 5: Information & Credits (2 Horizontal Cards) ──
                   SectionHeader(title: DI.languageService.translate('sec_about')),
                   Row(
                     children: [
                       _GridActionCard(
                         icon: Icons.storage_outlined,
                         title: DI.languageService.translate('tile_data_sources'),
-                        subtitle: 'NASA GIBS, NOAA, IPCC',
+                        subtitle: DI.languageService.translate('tile_data_sources_sub'),
                         accentColor: AppColors.forest,
                         onTap: () => _showDataSourcesModal(context),
                       ),
                       const SizedBox(width: 12),
                       _GridActionCard(
                         icon: Icons.info_outline,
-                        title: 'About Storyteller',
+                        title: DI.languageService.translate('tile_about'),
                         subtitle: DI.languageService.translate('tile_about_sub'),
                         accentColor: AppColors.primary,
                         onTap: () => _showAboutDialog(context),

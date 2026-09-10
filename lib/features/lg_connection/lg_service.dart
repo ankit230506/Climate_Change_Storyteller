@@ -31,7 +31,7 @@ enum ScreenRole { branding, history, reference, main, analysis, graphs, legend }
 int getLeftMostScreenNumber(int screenCount) {
   if (screenCount <= 1) return 1;
   if (screenCount == 2) return 2;
-  if (screenCount % 2 == 1) return screenCount; // 3 -> lg3, 5 -> lg5, 7 -> lg7
+  if (screenCount % 2 == 1) return screenCount;
   return screenCount - 1;
 }
 
@@ -40,7 +40,7 @@ int getLeftMostScreenNumber(int screenCount) {
 int getRightMostScreenNumber(int screenCount) {
   if (screenCount <= 1) return 1;
   if (screenCount == 2) return 1;
-  if (screenCount % 2 == 1) return screenCount - 1; // 3 -> lg2, 5 -> lg4, 7 -> lg6
+  if (screenCount % 2 == 1) return screenCount - 1;
   return screenCount;
 }
 
@@ -77,8 +77,6 @@ class LgService {
   static const _noaaBase = 'https://www.ncei.noaa.gov/cdo-web/api/v2';
   static const String kLgLogoUrl =
       'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEgXmdNgBTXup6bdWew5RzgCmC9pPb7rK487CpiscWB2S8OlhwFHmeeACHIIjx4B5-Iv-t95mNUx0JhB_oATG3-Tq1gs8Uj0-Xb9Njye6rHtKKsnJQJlzZqJxMDnj_2TXX3eA5x6VSgc8aw/s320-rw/LOGO+LIQUID+GALAXY-sq1000-+OKnoline.png';
-
-  // Oblique camera tilt so extruded/3D geometry is visible on screens
   static const double _default3DTilt = 35.0;
   static const double _default3DHeading = 15.0;
 
@@ -89,10 +87,6 @@ class LgService {
     'heat':     'MODIS_Terra_Land_Surface_Temp_Day',
     'aqi':      'MODIS_Terra_Aerosol',
   };
-
-  // ─────────────────────────────────────────────
-  // SSH & Connection Methods
-  // ─────────────────────────────────────────────
 
   Future<bool> connect({
     required String ipAddress,
@@ -117,19 +111,12 @@ class LgService {
       );
       await client.authenticated;
       _client = client;
-
-      // Open a persistent SFTP session for file uploads
       try {
         _sftp = await client.sftp();
       } catch (_) {
-        // SFTP may fail on some setups; fall back to shell commands
         _sftp = null;
       }
-
-      // Verify kml folder exists and is writable, create if not
       await execute('mkdir -p $_kmlDir');
-
-      // Do the same for slave screens
       for (int i = 2; i <= screenCount; i++) {
         try {
           await execute(
@@ -138,11 +125,9 @@ class LgService {
           );
         } catch (_) {}
       }
-
-      // Try to auto-detect web server port if not manually specified
       int detectedPort = webPort ?? 81;
       if (webPort == null || webPort == 0) {
-        detectedPort = 81; // Default fallback
+        detectedPort = 81;
         try {
           final check80 = await execute(
             'curl -s -o /dev/null -w "%{http_code}" http://localhost:80/ || '
@@ -160,7 +145,6 @@ class LgService {
             }
           }
         } catch (_) {
-          // Fallback to ss/netstat checks if curl/wget is not available
           try {
             final out = await execute(
               '/usr/sbin/ss -tln 2>/dev/null | grep -E ":80|:81" || '
@@ -202,18 +186,13 @@ class LgService {
       ));
 
       _startKeepalive();
-
-      // Set permissions on the KML directory
       await execute('sudo chown -R lg:lg $_kmlDir 2>/dev/null; '
           'chmod -R 755 $_kmlDir 2>/dev/null; '
           'chmod 755 /var/www/html 2>/dev/null');
-
-      // Configure the NetworkLink in Google Earth's MyPlaces.kml
       try {
         await setupNetworkLink();
         await _sendInitialConnectionOverlays();
       } catch (e) {
-        // ignore: avoid_print
         print('Auto setupNetworkLink failed: $e');
       }
 
@@ -255,14 +234,12 @@ class LgService {
     return utf8.decode(result, allowMalformed: true);
   }
 
-  // ─────────────────────────────────────────────
-  // LG Action Methods
-  // ─────────────────────────────────────────────
-
   int? _pendingTimeQueryYear;
   double? _pendingTimeQueryLat;
   double? _pendingTimeQueryLon;
   double? _pendingTimeQueryAlt;
+  double? _pendingTimeQueryTilt;
+  double? _pendingTimeQueryHeading;
   bool _isSendingTimeQuery = false;
 
   /// Immediately sends a time command to Liquid Galaxy query.txt
@@ -272,6 +249,8 @@ class LgService {
     double? latitude,
     double? longitude,
     double? altitude,
+    double? tilt,
+    double? heading,
   }) async {
     if (_client == null || !_state.isConnected) return;
 
@@ -279,6 +258,8 @@ class LgService {
     _pendingTimeQueryLat = latitude;
     _pendingTimeQueryLon = longitude;
     _pendingTimeQueryAlt = altitude;
+    _pendingTimeQueryTilt = tilt;
+    _pendingTimeQueryHeading = heading;
 
     if (_isSendingTimeQuery) return;
     _isSendingTimeQuery = true;
@@ -289,6 +270,8 @@ class LgService {
         final lat = _pendingTimeQueryLat ?? _lastFlyToLat ?? 28.6139;
         final lon = _pendingTimeQueryLon ?? _lastFlyToLon ?? 77.2090;
         final alt = _pendingTimeQueryAlt ?? _lastFlyToAlt ?? 500000.0;
+        final t = _pendingTimeQueryTilt ?? _default3DTilt;
+        final h = _pendingTimeQueryHeading ?? _default3DHeading;
         _pendingTimeQueryYear = null;
 
         final timeStr = '$targetYear-01-01T00:00:00Z';
@@ -299,8 +282,8 @@ class LgService {
             '<longitude>$lon</longitude>'
             '<latitude>$lat</latitude>'
             '<altitude>0</altitude>'
-            '<heading>$_default3DHeading</heading>'
-            '<tilt>$_default3DTilt</tilt>'
+            '<heading>$h</heading>'
+            '<tilt>$t</tilt>'
             '<range>$alt</range>'
             '<altitudeMode>relativeToGround</altitudeMode>'
             '<gx:TimeSpan><begin>$timeStr</begin><end>$endStr</end></gx:TimeSpan>'
@@ -315,8 +298,6 @@ class LgService {
       _isSendingTimeQuery = false;
     }
   }
-
-  // ── Bi-directional LG viewpoint synchronization stream ──────────────────
   Timer? _bgViewpointTimer;
   final _viewpointCtrl = StreamController<LgViewpoint>.broadcast();
 
@@ -355,12 +336,9 @@ class LgService {
 
   LgViewpoint? _parseLgQueryViewpoint(String queryText) {
     try {
-      // 1. Try XML tag format: <latitude>-3.4653</latitude>, <longitude>-62.2159</longitude>
       var latMatch = RegExp(r'<latitude>\s*([0-9.-]+)\s*</latitude>').firstMatch(queryText);
       var lonMatch = RegExp(r'<longitude>\s*([0-9.-]+)\s*</longitude>').firstMatch(queryText);
       var rangeMatch = RegExp(r'<range>\s*([0-9.-]+)\s*</range>').firstMatch(queryText);
-
-      // 2. Try query param format: latitude=-3.4653, longitude=-62.2159
       latMatch ??= RegExp(r'latitude=([0-9.-]+)').firstMatch(queryText);
       lonMatch ??= RegExp(r'longitude=([0-9.-]+)').firstMatch(queryText);
       rangeMatch ??= RegExp(r'range=([0-9.-]+)').firstMatch(queryText);
@@ -409,8 +387,6 @@ class LgService {
 
   Future<void> sendKml(String kmlFilename, {String? kmlContent}) async {
     if (_client == null) throw Exception('Not connected');
-
-    // Automatically upload logo overlay asset to the LG web server
     final category = _extractCategoryFromFilename(kmlFilename);
     await _uploadOverlayAssets(category);
 
@@ -438,24 +414,12 @@ class LgService {
       <rotationXY x="0" y="0" xunits="fraction" yunits="fraction"/>
       <size x="180" y="180" xunits="pixels" yunits="pixels"/>
     </ScreenOverlay>''';
-
-      // 1. Master KML (lg1): Retains TimeSpan & gx:TimeStamp for Time Slider GUI on Master ONLY.
-      // NO Logo overlay. NO Balloon popup.
       final masterContent = _stripBalloonVisibility(sceneOnly);
-
-      // 2. Leftmost KML (lg5 in 5-screen, lg3 in 3-screen): HAS Liquid Galaxy Logo overlay ONLY.
-      // NO TimeSpan/TimeStamp (no slider). NO Balloon popup.
       var leftMostContent = _stripBalloonVisibility(_stripTimeSpans(sceneOnly));
       if (!leftMostContent.contains('<ScreenOverlay>')) {
         leftMostContent = leftMostContent.replaceFirst('</Document>', '$effectiveLogoBlock</Document>');
       }
-
-      // 3. Rightmost KML (lg4 in 5-screen, lg2 in 3-screen): HAS Info Card Balloon popup ONLY.
-      // NO Logo overlay. NO TimeSpan/TimeStamp (no slider).
       final rightMostContent = _ensureBalloonVisibility(_stripTimeSpans(sceneOnly));
-
-      // 4. Regular Slave KML (middle screens): Pure 3D Earth scene geometry.
-      // NO Logo overlay. NO TimeSpan/TimeStamp (no slider). NO Balloon popup.
       final slaveContent = _stripBalloonVisibility(_stripTimeSpans(sceneOnly));
 
       final rightKmlFilename = 'right_$kmlFilename';
@@ -666,8 +630,6 @@ class LgService {
 
   Future<Uint8List> _fetchOrLoadRegionImagePng(ClimateRegion r) async {
     if (_imageCache.containsKey(r.id)) return _imageCache[r.id]!;
-
-    // 1. Try reading the local high-resolution asset image file directly if available
     try {
       final file = File(r.assetPath);
       if (await file.exists()) {
@@ -678,8 +640,6 @@ class LgService {
         }
       }
     } catch (_) {}
-
-    // 2. Try fetching from the high-res location photography URL
     try {
       final res = await http.get(Uri.parse(r.imageUrl)).timeout(const Duration(seconds: 4));
       if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
@@ -687,8 +647,6 @@ class LgService {
         return res.bodyBytes;
       }
     } catch (_) {}
-
-    // 3. Fallback to generated glassmorphic card
     final fallback = LGOverlays.createRegionBannerPng(r.id, r.name, r.category);
     _imageCache[r.id] = fallback;
     return fallback;
@@ -720,8 +678,6 @@ class LgService {
       }
     } catch (_) {}
   }
-
-  // Uploads data to remotePath via SFTP or falls back to a base64 shell pipe.
   Future<void> _sftpUpload(String remotePath, List<int> data) async {
     if (_sftp != null) {
       try {
@@ -791,8 +747,6 @@ class LgService {
     _lastFlyToAlt = targetAlt;
 
     _update(_state.copyWith(isOrbiting: true));
-
-    // First fly to the target KML coordinate so Google Earth travels to destination
     try {
       final initialLookAtKml =
           'flytoview=<LookAt>'
@@ -806,13 +760,9 @@ class LgService {
           '</LookAt>';
       await execute("echo '$initialLookAtKml' > $_queryFile");
     } catch (_) {}
-
-    // Wait until Google Earth's camera flight reaches the target KML coordinate
     if (flightDelay > Duration.zero) {
       await Future.delayed(flightDelay);
     }
-
-    // Abort if orbit was stopped or disconnected while flying to coordinate
     if (!_state.isOrbiting || _client == null || !_state.isConnected) {
       return;
     }
@@ -936,26 +886,16 @@ class LgService {
 
   Future<void> clearKml() async {
     if (_client == null) throw Exception('Not connected');
-
-    // A minimal valid-but-empty KML document.  Writing an empty string or
-    // blank line to the sync file causes Google Earth to reject it as
-    // invalid XML and stop polling, so we use this instead.
     const emptyKml =
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<kml xmlns="http://www.opengis.net/kml/2.2">'
         '<Document><name>Empty</name></Document></kml>';
     final emptyBytes = utf8.encode(emptyKml);
-
-    // Clear KML files on master
     await execute("rm -f $_kmlDir/*.kml 2>&1");
-
-    // Write empty-but-valid KML to sync files so GE keeps polling
     await _sftpUpload(_kmlSyncFile, emptyBytes);
     for (int i = 1; i <= _state.screenCount; i++) {
       await _sftpUpload('/var/www/html/kmls_$i.txt', emptyBytes);
     }
-
-    // Clear KML files on slave screens
     for (int i = 2; i <= _state.screenCount; i++) {
       try {
         await execute(
@@ -977,8 +917,6 @@ class LgService {
 
     final ip = _state.ipAddress ?? 'localhost';
     final port = _state.webPort;
-
-    // 1. Force kill Google Earth on Master and Slaves first to prevent setting overwrite on exit
     try {
       await execute('killall -9 googleearth-bin googleearth 2>/dev/null || pkill -9 googleearth 2>/dev/null');
     } catch (_) {}
@@ -991,22 +929,11 @@ class LgService {
         await execute(killCmd);
       } catch (_) {}
     }
-
-    // Wait for Google Earth processes to exit
     await Future.delayed(const Duration(milliseconds: 800));
-
-    // 2. Set up Master Node (Screen 1) pointing to its OWN sync file,
-    //    kmls_1.txt — not the shared kmls.txt. Every screen used to poll
-    //    the exact same file, so every screen showed identical content
-    //    (including the logo AND legend overlays stacked on every screen).
-    //    Each screen now gets a distinct file so we can vary content
-    //    per-screen (logo only on screen 1, legend only on the last screen).
     final masterLinkKml = _buildSyncPlacesKml('http://localhost:$port/kmls_1.txt');
     final masterBytes = utf8.encode(masterLinkKml);
 
     await execute('mkdir -p /home/lg/.googleearth /home/lg/.local/share/Google/GoogleEarth');
-
-    // Use SFTP to write MyPlaces.kml on master — no shell escaping issues
     for (final path in [
       '/home/lg/.googleearth/MyPlaces.kml',
       '/home/lg/.googleearth/myplaces.kml',
@@ -1015,27 +942,16 @@ class LgService {
     ]) {
       await _sftpUpload(path, masterBytes);
     }
-
-    // 3. Set up Slave Nodes (Screen 2 to screenCount), each pointing to its
-    //    OWN sync file http://$ip:$port/kmls_$i.txt (not the shared
-    //    kmls.txt) so different screens can show different content.
-    //    Strategy: write a slave KML per screen index to a temp file on the
-    //    master, then scp it to each corresponding slave — this avoids all
-    //    nested quoting issues.
     const slaveTmp = '/tmp/_cs_slave_myplaces.kml';
 
     for (int i = 2; i <= _state.screenCount; i++) {
       try {
         final slaveLinkKml = _buildSyncPlacesKml('http://$ip:$port/kmls_$i.txt');
         await _sftpUpload(slaveTmp, utf8.encode(slaveLinkKml));
-
-        // Create target directories on slave
         await execute(
           'sshpass -p lg ssh -o StrictHostKeyChecking=no lg@lg$i '
           '"mkdir -p /home/lg/.googleearth /home/lg/.local/share/Google/GoogleEarth"'
         );
-
-        // Copy the KML file from master to each slave via scp
         for (final destPath in [
           '/home/lg/.googleearth/MyPlaces.kml',
           '/home/lg/.googleearth/myplaces.kml',
@@ -1049,17 +965,8 @@ class LgService {
         }
       } catch (_) {}
     }
-
-    // Clean up temp file
     await execute('rm -f $slaveTmp 2>/dev/null');
-
-    // Wait for the files to write completely
     await Future.delayed(const Duration(milliseconds: 300));
-
-    // 4. Seed the sync file with a valid-but-empty KML document so that
-    //    Google Earth has something to parse on its very first poll.
-    //    Without this, GE may encounter a missing or empty file and stop
-    //    polling kmls.txt entirely.
     const seedKml =
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<kml xmlns="http://www.opengis.net/kml/2.2">'
@@ -1069,8 +976,6 @@ class LgService {
     for (int i = 1; i <= _state.screenCount; i++) {
       await _sftpUpload('/var/www/html/kmls_$i.txt', seedBytes);
     }
-
-    // 5. Relaunch Google Earth on all screens to apply changes
     await relaunchGoogleEarth();
     for (int i = 2; i <= _state.screenCount; i++) {
       try {
@@ -1107,18 +1012,12 @@ class LgService {
 </kml>''';
   }
 
-  // ─────────────────────────────────────────────
-  // KML Generation Methods
-  // ─────────────────────────────────────────────
-
   Future<Directory> get _localKmlDir async {
     final appDir = await getApplicationDocumentsDirectory();
     final dir = Directory('${appDir.path}/kmls');
     if (!dir.existsSync()) dir.createSync(recursive: true);
     return dir;
   }
-
-  // Increment to invalidate cached KML files when generator logic changes
   static const int _kmlCacheVersion = 60;
 
   Future<String> buildKml({
@@ -1199,8 +1098,6 @@ class LgService {
       regionData: regionData,
     );
   }
-
-  // Size of regional box in degrees
   static const double _overlayDegreeOffset = 2.0;
 
   String _buildGibsOverlayUrl(
@@ -1233,12 +1130,19 @@ class LgService {
         '&BBOX=$west,$south,$east,$north'
         '&TRANSPARENT=TRUE'
         '&TIME=$date';
-    // Ampersands must be escaped as &amp; in KML
     return url.replaceAll('&', '&amp;');
   }
 
+  static double? _cachedNoaaTemp;
+  static DateTime? _lastNoaaFetch;
+
   Future<double?> _fetchNoaaTemperature(String? apiKey) async {
     if (apiKey == null || apiKey.isEmpty) return null;
+    if (_cachedNoaaTemp != null && _lastNoaaFetch != null) {
+      if (DateTime.now().difference(_lastNoaaFetch!).inHours < 1) {
+        return _cachedNoaaTemp;
+      }
+    }
     try {
       final uri = Uri.parse(
         '$_noaaBase/data?datasetid=GHCND'
@@ -1248,14 +1152,18 @@ class LgService {
         '&sortfield=date&sortorder=desc',
       );
       final res = await http.get(uri,
-          headers: {'token': apiKey}).timeout(const Duration(seconds: 8));
+          headers: {'token': apiKey}).timeout(const Duration(seconds: 2));
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body);
         final value = body['results']?[0]?['value'] as num?;
+        if (value != null) {
+          _cachedNoaaTemp = value.toDouble();
+          _lastNoaaFetch = DateTime.now();
+        }
         return value?.toDouble();
       }
     } catch (_) {}
-    return null;
+    return _cachedNoaaTemp;
   }
 
   double _interpolateMap(Map<int, double> map, int year) {
@@ -1383,16 +1291,12 @@ class LgService {
     }
 
     final isSpecialYear = activeYear != 1900 && activeYear != 2026 && activeYear != 2100;
-
-    // Determine Tipping Point & Severity Badge for active era
     final riskBadgeHtml = switch (activeYear) {
       <= 1950 => "<span style='background:#2ecc71;color:#ffffff;padding:5px 12px;border-radius:14px;font-size:14px;font-weight:bold;display:inline-block;'>🟢 BASELINE EQUILIBRIUM</span>",
       <= 1999 => "<span style='background:#f1c40f;color:#000000;padding:5px 12px;border-radius:14px;font-size:14px;font-weight:bold;display:inline-block;'>🟡 ELEVATED CLIMATE STRESS</span>",
       <= 2049 => "<span style='background:#e67e22;color:#ffffff;padding:5px 12px;border-radius:14px;font-size:14px;font-weight:bold;display:inline-block;'>🟧 ACTIVE TIPPING RISK</span>",
       _       => "<span style='background:#e74c3c;color:#ffffff;padding:5px 12px;border-radius:14px;font-size:14px;font-weight:bold;display:inline-block;'>🔴 CRITICAL TIPPING POINT BREACH</span>",
     };
-
-    // Regional Action & Mitigation Guide
     final actionGuideHtml = switch (region.category) {
       'glacier'  => 'Enforce Paris Agreement net-zero emissions targets; protect alpine watershed infrastructure; deploy early warning systems for glacial lake outburst floods.',
       'sealevel' => 'Construct nature-based living shorelines and sea walls; restore mangrove ecosystems; implement climate-managed retreat and aquifer protection plans.',
@@ -1593,8 +1497,6 @@ class LgService {
       final stLon = region.longitude + (st['dLon'] as double);
       final stName = st['name'] as String;
       final stType = st['type'] as String;
-
-      // 1. 3D Elevated Sensor Beacon Spire
       sb.writeln(LG3DVisuals.build3DSensorBeacon(
         centerLat: stLat,
         centerLon: stLon,
@@ -1604,8 +1506,6 @@ class LgService {
         name: '$stName 3D Beacon',
         description: '3D Environmental Sensor Node',
       ));
-
-      // 2. 3D Elevated Telemetry Corridor connecting to regional center
       sb.writeln(LG3DVisuals.build3DConnectingCorridor(
         fromLat: stLat,
         fromLon: stLon,
@@ -1616,8 +1516,6 @@ class LgService {
         lineWidth: 3.0,
         name: 'Telemetry Link: $stName -> ${region.name}',
       ));
-
-      // 3. Information Placemark & Sensor Telemetry Balloon
       sb.writeln('''
       <Placemark>
         <name>${LG3DVisuals.escapeXmlText(stName)}</name>
@@ -1666,8 +1564,6 @@ class LgService {
 
     buffer.writeln('<Folder><name>${LG3DVisuals.escapeXmlText(region.name)} 3D Geometric Progression</name>');
     buffer.writeln('<visibility>1</visibility><open>1</open>');
-
-    // Build sub-folders per era with TimeSpan for timeline control
     for (final e in ClimateEra.values) {
       final eraStats = _getEraStats(regionData, region.category, int.parse(e.label));
 
@@ -1675,8 +1571,6 @@ class LgService {
       buffer.writeln('<name>${LG3DVisuals.escapeXmlText(region.name)} \u2014 ${e.label}</name>');
       buffer.writeln('<visibility>1</visibility>');
       buffer.writeln(_timeSpanKml(e));
-
-      // Category-specific rich 3D geometric polynomial shape & structures
       switch (region.category) {
         case 'glacier':
           buffer.writeln(_glacier3DShape(region, e, eraStats));
@@ -1730,8 +1624,6 @@ class LgService {
       ClimateEra.midProjection2060 => ['ddf97316', 'ddef4444', 'ddf97316', 'ddef4444'],
       ClimateEra.projected2100     => ['eeb91c1c', 'eeef4444', 'eeb91c1c', 'eeef4444'],
     };
-
-    // Single 3D Atmospheric Geodesic Heat Dome
     sb.writeln(LG3DVisuals.build3DGeodesicDome(
       centerLat: region.latitude,
       centerLon: region.longitude,
@@ -1749,35 +1641,22 @@ class LgService {
 
   String _glacier3DShape(ClimateRegion region, ClimateEra era, Map<String, String> eraStats) {
     final sb = StringBuffer();
-
-    // 16 Large Crystalline Ice Spires spread across the glacial region
     final spires = [
-      // 4 Low-elevation valley tongues (melt in 1950 -> 16 down to 12)
       {'name': 'Lower Valley Terminus Tongue', 'dLat': -0.45, 'dLon': 0.30, 'meltEra': ClimateEra.midCentury1950},
       {'name': 'Glacial Lake Outflow Apron', 'dLat': -0.50, 'dLon': -0.35, 'meltEra': ClimateEra.midCentury1950},
       {'name': 'Southern Foothill Moraine Spire', 'dLat': -0.38, 'dLon': 0.45, 'meltEra': ClimateEra.midCentury1950},
       {'name': 'Southwest Valley Glacial Toe', 'dLat': -0.32, 'dLon': -0.48, 'meltEra': ClimateEra.midCentury1950},
-
-      // 4 Outer-mid icefields (melt in 1980 -> 12 down to 8)
       {'name': 'South Face Ice Apron Spire', 'dLat': -0.22, 'dLon': 0.38, 'meltEra': ClimateEra.lateCentury1980},
       {'name': 'Western Tributary Glacial Finger', 'dLat': 0.15, 'dLon': -0.46, 'meltEra': ClimateEra.lateCentury1980},
       {'name': 'Lower Cirque Firn Spire', 'dLat': -0.28, 'dLon': -0.44, 'meltEra': ClimateEra.lateCentury1980},
       {'name': 'Southeast Cirque Serac Spire', 'dLat': -0.12, 'dLon': 0.28, 'meltEra': ClimateEra.lateCentury1980},
-
-      // 3 Mid-elevation icefields (melt in 2026 -> 8 down to 5)
       {'name': 'Eastern Cirque Glacial Spire', 'dLat': 0.24, 'dLon': 0.40, 'meltEra': ClimateEra.present2026},
       {'name': 'North Ridge Icefall Spire', 'dLat': 0.36, 'dLon': 0.20, 'meltEra': ClimateEra.present2026},
       {'name': 'Central Glacial Pass Spire', 'dLat': -0.10, 'dLon': -0.20, 'meltEra': ClimateEra.present2026},
-
-      // 3 High-plateau icefields (melt in 2060 -> 5 down to 2)
       {'name': 'Upper Firn Basin Ice Shard', 'dLat': 0.30, 'dLon': -0.24, 'meltEra': ClimateEra.midProjection2060},
       {'name': 'Northwestern Serac Wall Spire', 'dLat': 0.40, 'dLon': -0.34, 'meltEra': ClimateEra.midProjection2060},
       {'name': 'Northeast High Ridge Spire', 'dLat': 0.44, 'dLon': 0.10, 'meltEra': ClimateEra.midProjection2060},
-
-      // 1 High col peak (melts in 2100 -> 2 down to 1)
       {'name': 'High Alpine Nunatak Spire', 'dLat': 0.16, 'dLon': 0.12, 'meltEra': ClimateEra.projected2100},
-
-      // 1 Solitary Summit Peak (survives in 2100 -> 1 remaining)
       {'name': 'Summit Diamond Horn Peak', 'dLat': 0.0, 'dLon': 0.0, 'meltEra': ClimateEra.projected2100},
     ];
 
@@ -1789,8 +1668,6 @@ class LgService {
       final sLon = region.longitude + (s['dLon'] as double);
       final sName = s['name'] as String;
       final meltEra = s['meltEra'] as ClimateEra;
-
-      // Only render if still intact in this era. If melted, it completely vanishes!
       if (era.index <= meltEra.index) {
         sb.writeln(LG3DVisuals.build3DGlacialSpire(
           centerLat: sLat,
@@ -1815,34 +1692,22 @@ class LgService {
     final sb = StringBuffer();
 
     if (region.id == 'pacific') {
-      // 16 Freshwater Aquifer Bio-Lens Cells across the Pacific Atolls
       final aquifers = [
-        // 4 Low-lying outer atoll freshwater lenses (salinize & vanish in 1950 -> 16 down to 12)
         {'name': 'Outer Fongafale Atoll Lens', 'dLat': -0.45, 'dLon': 0.30, 'dryEra': ClimateEra.midCentury1950},
         {'name': 'South Nanumea Aquifer Well', 'dLat': -0.50, 'dLon': -0.34, 'dryEra': ClimateEra.midCentury1950},
         {'name': 'Eastern Tarawa Lagoon Well', 'dLat': -0.36, 'dLon': 0.46, 'dryEra': ClimateEra.midCentury1950},
         {'name': 'Southwest Coral Cay Lens', 'dLat': -0.30, 'dLon': -0.48, 'dryEra': ClimateEra.midCentury1950},
-
-        // 4 Peri-urban atoll aquifers (salinize & vanish in 1980 -> 12 down to 8)
         {'name': 'Betio Groundwater Basin', 'dLat': 0.20, 'dLon': -0.38, 'dryEra': ClimateEra.lateCentury1980},
         {'name': 'Funafuti Northern Aquifer', 'dLat': 0.16, 'dLon': 0.42, 'dryEra': ClimateEra.lateCentury1980},
         {'name': 'Majuro Western Lens Reserve', 'dLat': 0.35, 'dLon': 0.12, 'dryEra': ClimateEra.lateCentury1980},
         {'name': 'Southern Atoll Wellfield', 'dLat': -0.18, 'dLon': -0.28, 'dryEra': ClimateEra.lateCentury1980},
-
-        // 3 Mid-island freshwater reserves (salinize & vanish in 2026 -> 8 down to 5)
         {'name': 'Central Laura Freshwater Lens', 'dLat': -0.10, 'dLon': -0.30, 'dryEra': ClimateEra.present2026},
         {'name': 'Bonriki Aquifer Sanctuary', 'dLat': 0.26, 'dLon': 0.22, 'dryEra': ClimateEra.present2026},
         {'name': 'Kiritimati North Water Well', 'dLat': -0.22, 'dLon': 0.15, 'dryEra': ClimateEra.present2026},
-
-        // 3 Deep Atoll Core Aquifers (salinize & vanish in 2060 -> 5 down to 2)
         {'name': 'Main Island Elevated Water Table', 'dLat': 0.08, 'dLon': 0.14, 'dryEra': ClimateEra.midProjection2060},
         {'name': 'Abaiang Protected Lens Reserve', 'dLat': 0.28, 'dLon': -0.16, 'dryEra': ClimateEra.midProjection2060},
         {'name': 'Tuvalu Deep Groundwater Hub', 'dLat': -0.24, 'dLon': 0.05, 'dryEra': ClimateEra.midProjection2060},
-
-        // 1 Emergency Desalination Reserve (compromised in 2100 -> 2 down to 1)
         {'name': 'Inner Causeway Aquifer Pocket', 'dLat': 0.12, 'dLon': -0.06, 'dryEra': ClimateEra.projected2100},
-
-        // 1 Fortified Desalination & Deep Aquifer Bunker (survives in 2100 -> 1 remaining)
         {'name': 'Central Fortified Aquifer Vault', 'dLat': 0.0, 'dLon': 0.0, 'dryEra': ClimateEra.projected2100},
       ];
 
@@ -1854,8 +1719,6 @@ class LgService {
         final aLon = region.longitude + (a['dLon'] as double);
         final aName = a['name'] as String;
         final dryEra = a['dryEra'] as ClimateEra;
-
-        // Only render if freshwater lens is intact in this era. If salinized/submerged, it completely vanishes!
         if (era.index <= dryEra.index) {
           sb.writeln(LG3DVisuals.build3DHexagonalPrism(
             centerLat: aLat,
@@ -1871,7 +1734,6 @@ class LgService {
         }
       }
     } else {
-      // Single 3D Stepped Water Inundation Slices (e.g. for Maldives)
       final tiers = switch (era) {
         ClimateEra.preindustrial1900 => [3000.0],
         ClimateEra.midCentury1950    => [4000.0, 8000.0],
@@ -1907,35 +1769,22 @@ class LgService {
 
   String _forest3DShape(ClimateRegion region, ClimateEra era, Map<String, String> eraStats) {
     final sb = StringBuffer();
-
-    // 16 Large Spatial Canopy Prisms spread across the regional territory
     final sectors = [
-      // 4 Outermost frontier sectors (vanish in 1950 -> 16 down to 12)
       {'name': 'Rondônia South Frontier', 'dLat': -0.45, 'dLon': -0.40, 'deathEra': ClimateEra.midCentury1950},
       {'name': 'Mato Grosso Southern Edge', 'dLat': -0.50, 'dLon': 0.35, 'deathEra': ClimateEra.midCentury1950},
       {'name': 'Pará Southeastern Timber Belt', 'dLat': -0.38, 'dLon': 0.48, 'deathEra': ClimateEra.midCentury1950},
       {'name': 'Guaporé Basin Clearing Arc', 'dLat': -0.32, 'dLon': -0.50, 'deathEra': ClimateEra.midCentury1950},
-
-      // 4 Outer-mid sectors (vanish in 1980 -> 12 down to 8)
       {'name': 'BR-163 Highway Logging Arc', 'dLat': -0.22, 'dLon': 0.20, 'deathEra': ClimateEra.lateCentury1980},
       {'name': 'Eastern Pará Timber Sector', 'dLat': 0.20, 'dLon': 0.44, 'deathEra': ClimateEra.lateCentury1980},
       {'name': 'Acre Western Agricultural Frontier', 'dLat': -0.26, 'dLon': -0.42, 'deathEra': ClimateEra.lateCentury1980},
       {'name': 'Purus River Clearance Belt', 'dLat': -0.14, 'dLon': -0.25, 'deathEra': ClimateEra.lateCentury1980},
-
-      // 3 Mid-basin sectors (vanish in 2026 -> 8 down to 5)
       {'name': 'Tapajós River Logging Sector', 'dLat': 0.26, 'dLon': 0.24, 'deathEra': ClimateEra.present2026},
       {'name': 'Xingu Basin Deforestation Sector', 'dLat': -0.16, 'dLon': 0.36, 'deathEra': ClimateEra.present2026},
       {'name': 'Madeira River Valley Canopy', 'dLat': 0.06, 'dLon': -0.20, 'deathEra': ClimateEra.present2026},
-
-      // 3 Interior sectors (vanish in 2060 -> 5 down to 2)
       {'name': 'Amapá Coastal Forest Transition', 'dLat': 0.40, 'dLon': 0.30, 'deathEra': ClimateEra.midProjection2060},
       {'name': 'Roraima Northern Savanna Boundary', 'dLat': 0.44, 'dLon': -0.16, 'deathEra': ClimateEra.midProjection2060},
       {'name': 'Negro River Rainforest Preserve', 'dLat': 0.24, 'dLon': -0.06, 'deathEra': ClimateEra.midProjection2060},
-
-      // 1 Near-core sector (vanishes in 2100 -> 2 down to 1)
       {'name': 'Juruá Deep Wilderness Sector', 'dLat': 0.16, 'dLon': -0.34, 'deathEra': ClimateEra.projected2100},
-
-      // 1 Solitary Core Sanctuary (survives in 2100 -> 1 remaining)
       {'name': 'Central Manaus Primary Sanctuary', 'dLat': 0.0, 'dLon': 0.0, 'deathEra': ClimateEra.projected2100},
     ];
 
@@ -1947,8 +1796,6 @@ class LgService {
       final sLon = region.longitude + (s['dLon'] as double);
       final sName = s['name'] as String;
       final deathEra = s['deathEra'] as ClimateEra;
-
-      // Only render if still alive in this era. If deforested, it completely vanishes!
       if (era.index <= deathEra.index) {
         sb.writeln(LG3DVisuals.build3DHexagonalPrism(
           centerLat: sLat,
@@ -2005,8 +1852,6 @@ class LgService {
       ClimateEra.midProjection2060 => 0.30,
       ClimateEra.projected2100     => 0.38,
     };
-
-    // Single 3D Inverted Smog Funnel
     sb.writeln(LG3DVisuals.build3DInvertedSmogFunnel(
       centerLat: region.latitude,
       centerLon: region.longitude,
@@ -2021,10 +1866,6 @@ class LgService {
 
     return sb.toString();
   }
-
-  // ─────────────────────────────────────────────
-  // Visual Enhancement Helpers
-  // ─────────────────────────────────────────────
 
   /// Returns a KML <TimeSpan> element so Google Earth's timeline slider
   /// toggles visibility of each era's geometry, labels, and data bars.
@@ -2079,16 +1920,12 @@ class LgService {
     sb.writeln('Rig IP: ${_state.ipAddress}:${_state.port}');
     sb.writeln('Screen Count: ${_state.screenCount}');
     sb.writeln('');
-
-    // 1. Check disk space and basic system info
     try {
       final uname = await execute('uname -a');
       sb.writeln('🐧 OS Info: ${uname.trim()}');
     } catch (e) {
       sb.writeln('🐧 OS Info Check Failed: $e');
     }
-
-    // 2. Check Web Server (Apache/Nginx) status
     sb.writeln('\n--- Web Server Check ---');
     try {
       final ports = await execute('sudo netstat -tlnp 2>/dev/null | grep -E "apache|nginx|lighttpd" || ss -tlnp 2>/dev/null | grep -E "80|81" || netstat -tln 2>/dev/null | grep -E "80|81"');
@@ -2110,8 +1947,6 @@ class LgService {
     } catch (e) {
       sb.writeln('Local Port 81 Check Failed: $e');
     }
-
-    // 3. Check KML Directory existence and permissions
     sb.writeln('\n--- KML Directory & Permissions ---');
     try {
       final lsKml = await execute('ls -la $_kmlDir');
@@ -2126,8 +1961,6 @@ class LgService {
     } catch (e) {
       sb.writeln('Failed to list /var/www/html: $e');
     }
-
-    // 4. Check Apache Access Logs
     sb.writeln('\n--- Apache Access Logs (Last 15 lines) ---');
     try {
       final logs = await execute('sudo tail -n 15 /var/log/apache2/access.log || sudo tail -n 15 /var/log/nginx/access.log || tail -n 15 /var/log/httpd/access_log');
@@ -2142,13 +1975,10 @@ class LgService {
         'ps aux | grep -i earth; echo ---; who; echo ---; echo DISPLAY=\$DISPLAY'
       );
       sb.writeln(extra.trim().isEmpty ? 'No processes found.' : extra.trim());
-      // ignore: avoid_print
       print(extra);
     } catch (e) {
       sb.writeln('Failed to execute process check: $e');
     }
-
-    // 5. Check Google Earth places.kml for NetworkLink
     sb.writeln('\n--- Google Earth Configuration Check ---');
     try {
       final gePlaces = await execute('cat /home/lg/.googleearth/MyPlaces.kml 2>/dev/null || cat /home/lg/.local/share/Google/GoogleEarth/myplaces.kml 2>/dev/null');
@@ -2172,16 +2002,12 @@ class LgService {
 
     final results = <String, String>{};
     final port = _state.webPort;
-
-    // 1. Check if the kml directory exists and has files
     try {
       final ls = await execute('ls -la $_kmlDir/ 2>&1');
       results['1_kml_dir'] = ls.trim().isEmpty ? '❌ EMPTY' : '✅ Files exist:\n$ls';
     } catch (e) {
       results['1_kml_dir'] = '❌ ERROR: $e';
     }
-
-    // 2. Check if kmls.txt exists and has content
     try {
       final content = await execute('cat $_kmlSyncFile 2>&1 | head -c 500');
       if (content.contains('<?xml') || content.contains('<kml')) {
@@ -2194,8 +2020,6 @@ class LgService {
     } catch (e) {
       results['2_kmls_txt'] = '❌ ERROR reading: $e';
     }
-
-    // 3. Check if web server is serving kmls.txt
     try {
       final curlResult = await execute('curl -s -w "\\nHTTP_CODE:%{http_code}" http://localhost:$port/kmls.txt 2>&1 | tail -5');
       if (curlResult.contains('HTTP_CODE:200')) {
@@ -2210,8 +2034,6 @@ class LgService {
     } catch (e) {
       results['3_web_server'] = '❌ curl failed: $e';
     }
-
-    // 4. Check Google Earth MyPlaces.kml for NetworkLink
     try {
       final places = await execute(
         'cat /home/lg/.googleearth/myplaces.kml 2>/dev/null || '
@@ -2232,8 +2054,6 @@ class LgService {
     } catch (e) {
       results['4_myplaces'] = '❌ ERROR: $e';
     }
-
-    // 5. Check if Google Earth is running
     try {
       final ps = await execute('ps -eo user,pid,cmd | grep -E "google-earth|googleearth-bin" | grep -v grep || echo "NOT_RUNNING"');
       final whoami = await execute('whoami');
@@ -2246,8 +2066,6 @@ class LgService {
     } catch (e) {
       results['5_ge_running'] = '⚠️ Check failed: $e';
     }
-
-    // 6. Test direct KML fetch that GE would do
     try {
       final fetch = await execute('curl -s http://localhost:$port/kmls.txt 2>&1 | head -c 200');
       results['6_ge_would_see'] = 'What GE polls every 2s:\n$fetch';
@@ -2278,12 +2096,6 @@ class LgService {
 
 
 class LG3DVisuals {
-  // Any free-text string (name, description) embedded directly into KML
-  // (i.e. NOT wrapped in <![CDATA[ ]]>) must have XML special characters
-  // escaped. A raw "&" — e.g. in "... Mesh & Hotspot Spikes" — breaks
-  // parsing of the ENTIRE document, not just that one <name> tag, which is
-  // why a single unescaped "&" in a Folder/Placemark name can make the
-  // whole KML fail to render on the rig.
   static String escapeXmlText(String s) => s
       .replaceAll('&', '&amp;')
       .replaceAll('<', '&lt;')
@@ -2317,8 +2129,6 @@ class LG3DVisuals {
     }
 
     final tierHeight = heightMeters / tiers;
-
-    // Generate ring points at each tier level
     final tierPoints = <List<String>>[];
     for (int t = 0; t <= tiers; t++) {
       final h = (t * tierHeight).toStringAsFixed(1);
@@ -2331,8 +2141,6 @@ class LG3DVisuals {
       }
       tierPoints.add(ring);
     }
-
-    // Cylindrical wall panels with wireframe outlines
     for (int t = 0; t < tiers; t++) {
       final bottomRing = tierPoints[t];
       final topRing = tierPoints[t + 1];
@@ -2360,8 +2168,6 @@ class LG3DVisuals {
         </Polygon>
       </Placemark>''');
       }
-
-      // Horizontal glowing wireframe ring at this tier
       final ringCoordinates = '${topRing.join(' ')} ${topRing[0]}';
       sb.writeln('''
       <Placemark>
@@ -2376,8 +2182,6 @@ class LG3DVisuals {
         </LineString>
       </Placemark>''');
     }
-
-    // Top illuminated cap
     final topRing = tierPoints.last;
     final topCoordinates = '${topRing.join(' ')} ${topRing[0]}';
     sb.writeln('''
@@ -2586,8 +2390,6 @@ class LG3DVisuals {
       bottomPoints.add('${lon.toStringAsFixed(6)},${lat.toStringAsFixed(6)},0');
       topPoints.add('${lon.toStringAsFixed(6)},${lat.toStringAsFixed(6)},$h');
     }
-
-    // 6 Vertical Hexagonal Facet Walls
     for (int i = 0; i < sides; i++) {
       final next = (i + 1) % sides;
       sb.writeln('''
@@ -2610,8 +2412,6 @@ class LG3DVisuals {
         </Polygon>
       </Placemark>''');
     }
-
-    // Hexagonal Top Plate
     final topCoords = '${topPoints.join(' ')} ${topPoints[0]}';
     sb.writeln('''
     <Placemark>
@@ -2720,8 +2520,6 @@ class LG3DVisuals {
       basePoints.add('${bLon.toStringAsFixed(6)},${bLat.toStringAsFixed(6)},0');
       topPoints.add('${tLon.toStringAsFixed(6)},${tLat.toStringAsFixed(6)},$h');
     }
-
-    // Inverted Funnel Flared Facets
     for (int i = 0; i < segments; i++) {
       final next = (i + 1) % segments;
       sb.writeln('''
@@ -2744,8 +2542,6 @@ class LG3DVisuals {
         </Polygon>
       </Placemark>''');
     }
-
-    // Top Atmospheric Ceiling Disk
     final topCoords = '${topPoints.join(' ')} ${topPoints[0]}';
     sb.writeln('''
     <Placemark>
@@ -2849,8 +2645,6 @@ class LG3DVisuals {
     if (description.isNotEmpty) {
       sb.writeln('  <description><![CDATA[$description]]></description>');
     }
-
-    // Upper Diamond facets
     for (int i = 0; i < segments; i++) {
       final next = (i + 1) % segments;
       sb.writeln('''
@@ -2871,8 +2665,6 @@ class LG3DVisuals {
           </coordinates></LinearRing></outerBoundaryIs>
         </Polygon>
       </Placemark>''');
-
-      // Lower Diamond facets to ground
       sb.writeln('''
       <Placemark>
         <name>Beacon Diamond Lower ${i + 1}</name>
@@ -3047,8 +2839,6 @@ class LG3DVisuals {
         ''');
       }
     }
-
-    // 3D Cones / Pyramids at Hotspot Nodes
     final hotspotOffsets = [
       {'dLat': 0.12,  'dLon': -0.12, 'scale': 1.0},
       {'dLat': -0.20, 'dLon': 0.18,  'scale': 0.85},
@@ -3119,7 +2909,7 @@ class LG3DVisuals {
     required double centerLon,
     required double spanDeg,
     required double heightMeters,
-    required List<String> faceColorsAbgr, // 5 colors: South, East, North, West, Top
+    required List<String> faceColorsAbgr,
     String name = '3D Box',
     String description = '',
   }) {
@@ -3225,7 +3015,7 @@ class LG3DVisuals {
     required double centerLon,
     required double radiusDeg,
     required double heightMeters,
-    required List<String> sideColorsAbgr, // 9 colors: 8 sides + 1 top
+    required List<String> sideColorsAbgr,
     String name = '3D Octagonal Column',
     String description = '',
   }) {
@@ -3293,7 +3083,7 @@ class LG3DVisuals {
     required double centerLon,
     required double radiusDeg,
     required double heightMeters,
-    required List<String> faceColorsAbgr, // 8 colors
+    required List<String> faceColorsAbgr,
     String name = '3D Heat Dome',
     String description = '',
   }) {
@@ -3353,14 +3143,10 @@ class LG3DVisuals {
     String description = '',
   }) {
     final half = spanDeg / 2;
-
-    // Base Corners on Ground (altitude = 0)
     final sw = '${centerLon - half},${centerLat - half},0';
     final se = '${centerLon + half},${centerLat - half},0';
     final ne = '${centerLon + half},${centerLat + half},0';
     final nw = '${centerLon - half},${centerLat + half},0';
-
-    // Apex / Peak at the center with altitude heightMeters
     final h = heightMeters.toStringAsFixed(1);
     final peak = '$centerLon,$centerLat,$h';
 

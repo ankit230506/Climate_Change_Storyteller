@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:climate_storyteller/core/constant/app_theme.dart';
+import 'package:climate_storyteller/core/di/injection_container.dart';
 import 'package:climate_storyteller/features/explore/shell_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
@@ -97,7 +98,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Progress bar
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
               child: Row(
@@ -115,8 +115,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 }),
               ),
             ),
-
-            // Step indicator
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
               child: Align(
@@ -127,8 +125,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 ),
               ),
             ),
-
-            // Pages
             Expanded(
               child: PageView.builder(
                 controller: _controller,
@@ -138,8 +134,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     _OnboardPageWidget(page: _pages[i]),
               ),
             ),
-
-            // Navigation buttons
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
               child: Row(
@@ -148,7 +142,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     Expanded(
                       child: OutlinedButton(
                         onPressed: _back,
-                        child: const Text('← Back'),
+                        child: Text('← ${DI.languageService.translate('btn_back')}'),
                       ),
                     ),
                   if (_page > 0) const SizedBox(width: 12),
@@ -157,7 +151,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     child: ElevatedButton(
                       onPressed: _next,
                       child: Text(
-                        _page < _pages.length - 1 ? 'Next →' : 'Get Started',
+                        _page < _pages.length - 1
+                            ? '${DI.languageService.translate('onboarding_next')} →'
+                            : DI.languageService.translate('onboarding_get_started'),
                       ),
                     ),
                   ),
@@ -207,7 +203,6 @@ class _OnboardPageWidget extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // Icon card
           Container(
             width: 100,
             height: 100,
