@@ -176,9 +176,10 @@ class _ClimateYearSliderState extends State<ClimateYearSlider> {
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(width: 12),
-        SizedBox(
-          width: 56,
+        ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 56),
           child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
               Text(
                 '$year',
